@@ -169,6 +169,16 @@ function deriveBgFromFg(fgAnsi: string, intensity: number): string {
 	return `\x1b[48;2;${r};${g};${b}m`;
 }
 
+/** Mix an accent color into a base color at the given intensity (0.0–1.0).
+ *  Returns an ANSI 24-bit background escape. Used to derive diff backgrounds
+ *  that blend with the tool box background (toolSuccessBg). */
+function mixBg(base: { r: number; g: number; b: number }, accent: { r: number; g: number; b: number }, intensity: number): string {
+	const r = Math.round(base.r + (accent.r - base.r) * intensity);
+	const g = Math.round(base.g + (accent.g - base.g) * intensity);
+	const b = Math.round(base.b + (accent.b - base.b) * intensity);
+	return `\x1b[48;2;${r};${g};${b}m`;
+}
+
 /** Whether auto-derive from theme is still pending (runs lazily on first render). */
 let _autoDerivePending = true;
 
@@ -176,37 +186,44 @@ let _autoDerivePending = true;
 let _hasExplicitBgConfig = false;
 
 /** Auto-derive all diff background colors from the pi theme's fg diff colors.
- *  Uses different intensity levels for line bg, word highlights, and gutters. */
+ *  Reads toolSuccessBg as the base and mixes accent colors into it.
+ *  Falls back to black (0,0,0) as base if toolSuccessBg is unavailable. */
 function autoDeriveBgFromTheme(theme: any): void {
 	if (!theme?.getFgAnsi) return;
 	try {
 		const fgAdd = theme.getFgAnsi("toolDiffAdded");
 		const fgDel = theme.getFgAnsi("toolDiffRemoved");
+		const addRgb = parseAnsiRgb(fgAdd);
+		const delRgb = parseAnsiRgb(fgDel);
+		if (!addRgb || !delRgb) return;
 
-		// Line backgrounds — subtle tint (8–10% of fg color)
-		const bgAdd = deriveBgFromFg(fgAdd, 0.08);
-		if (bgAdd) BG_ADD = bgAdd;
-		const bgDel = deriveBgFromFg(fgDel, 0.10);
-		if (bgDel) BG_DEL = bgDel;
+		// Read toolSuccessBg as the base background color
+		let base = { r: 0, g: 0, b: 0 };
+		if (theme.getBgAnsi) {
+			try {
+				const bgAnsi = theme.getBgAnsi("toolSuccessBg");
+				const parsed = parseAnsiRgb(bgAnsi);
+				if (parsed) {
+					base = parsed;
+					BG_BASE = bgAnsi;
+				}
+			} catch { /* no toolSuccessBg — use black */ }
+		}
+
+		// Line backgrounds — subtle accent mixed into base (8–10%)
+		BG_ADD = mixBg(base, addRgb, 0.08);
+		BG_DEL = mixBg(base, delRgb, 0.10);
 
 		// Word-level highlights — more visible (20–22%)
-		const bgAddW = deriveBgFromFg(fgAdd, 0.20);
-		if (bgAddW) BG_ADD_W = bgAddW;
-		const bgDelW = deriveBgFromFg(fgDel, 0.22);
-		if (bgDelW) BG_DEL_W = bgDelW;
+		BG_ADD_W = mixBg(base, addRgb, 0.20);
+		BG_DEL_W = mixBg(base, delRgb, 0.22);
 
 		// Gutters — subtler than lines (5–6%)
-		const bgGA = deriveBgFromFg(fgAdd, 0.05);
-		if (bgGA) BG_GUTTER_ADD = bgGA;
-		const bgGD = deriveBgFromFg(fgDel, 0.06);
-		if (bgGD) BG_GUTTER_DEL = bgGD;
+		BG_GUTTER_ADD = mixBg(base, addRgb, 0.05);
+		BG_GUTTER_DEL = mixBg(base, delRgb, 0.06);
 
-		// Empty filler — neutral dark from add color luminance
-		const addRgb = parseAnsiRgb(fgAdd);
-		if (addRgb) {
-			const lum = Math.round((addRgb.r * 0.3 + addRgb.g * 0.6 + addRgb.b * 0.1) * 0.04);
-			BG_EMPTY = `\x1b[48;2;${lum};${lum};${lum}m`;
-		}
+		// Empty filler and context — match the base
+		BG_EMPTY = BG_BASE;
 
 		// Rebuild derived constants
 		DIVIDER = `${FG_RULE}│${RST}`;
@@ -392,6 +409,7 @@ const ANSI_RE = new RegExp(`${ESC_RE}\\[[0-9;]*m`, "g");
 const ANSI_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([^m]*)m`, "g");
 const ANSI_PARAM_CAPTURE_RE = new RegExp(`${ESC_RE}\\[([0-9;]*)m`, "g");
 const BG_DEFAULT = "\x1b[49m"; // reset to terminal default background
+let BG_BASE = BG_DEFAULT; // tool box base bg — updated from theme's toolSuccessBg
 
 // ---------------------------------------------------------------------------
 // Theme-aware diff colors
@@ -407,8 +425,18 @@ interface DiffColors {
 let DEFAULT_DIFF_COLORS: DiffColors = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_DIM };
 
 /** Resolve diff fg colors from theme (if available), falling back to hardcoded ANSI.
- *  On first call with a valid theme, auto-derives bg colors if no explicit config was set. */
+ *  On first call with a valid theme, auto-derives bg colors if no explicit config was set.
+ *  Always reads toolSuccessBg for BG_BASE (used for context line backgrounds). */
 function resolveDiffColors(theme?: any): DiffColors {
+	// Always read toolSuccessBg for BG_BASE (even with explicit config)
+	if (theme?.getBgAnsi && BG_BASE === BG_DEFAULT) {
+		try {
+			const bgAnsi = theme.getBgAnsi("toolSuccessBg");
+			const parsed = parseAnsiRgb(bgAnsi);
+			if (parsed) BG_BASE = bgAnsi;
+		} catch { /* ignore */ }
+	}
+
 	// Auto-derive bg colors from theme on first render (if no explicit preset/overrides)
 	if (_autoDerivePending && theme?.getFgAnsi) {
 		autoDeriveBgFromTheme(theme);
@@ -954,7 +982,7 @@ async function renderUnified(
 		bodyBg = "",
 	): void {
 		const borderFg = sign === "-" ? dc.fgDel : sign === "+" ? dc.fgAdd : "";
-		const border = borderFg ? `${borderFg}${BORDER_BAR}${RST}` : `${BG_DEFAULT} `;
+		const border = borderFg ? `${borderFg}${BORDER_BAR}${RST}` : `${BG_BASE} `;
 		const numFg = borderFg || FG_LNUM;
 		const gutter = `${border}${gutterBg}${lnum(num, nw, numFg)}${signFg}${sign}${RST} ${DIVIDER} `;
 		const contGutter = `${border}${gutterBg}${" ".repeat(nw + 1)}${RST} ${DIVIDER} `;
@@ -982,7 +1010,7 @@ async function renderUnified(
 		// Context line — dimmed, single line number
 		if (l.type === "ctx") {
 			const hl = oldHL[oI] ?? l.content;
-			emitRow(l.newNum, " ", BG_DEFAULT, dc.fgCtx, `${BG_DEFAULT}${DIM}${hl}`, BG_DEFAULT);
+			emitRow(l.newNum, " ", BG_BASE, dc.fgCtx, `${BG_BASE}${DIM}${hl}`, BG_BASE);
 			oI++;
 			nI++;
 			idx++;
@@ -1126,15 +1154,15 @@ async function renderSplit(
 
 		const isDel = line.type === "del",
 			isAdd = line.type === "add";
-		const gBg = isDel ? BG_GUTTER_DEL : isAdd ? BG_GUTTER_ADD : BG_DEFAULT;
-		const cBg = isDel ? BG_DEL : isAdd ? BG_ADD : BG_DEFAULT;
+		const gBg = isDel ? BG_GUTTER_DEL : isAdd ? BG_GUTTER_ADD : BG_BASE;
+		const cBg = isDel ? BG_DEL : isAdd ? BG_ADD : BG_BASE;
 		const sFg = isDel ? dc.fgDel : isAdd ? dc.fgAdd : dc.fgCtx;
 		const sign = isDel ? "-" : isAdd ? "+" : " ";
 		const num = isDel ? line.oldNum : isAdd ? line.newNum : side === "left" ? line.oldNum : line.newNum;
 
 		// Border bar + colored line numbers for changed lines
 		const borderFg = isDel ? dc.fgDel : isAdd ? dc.fgAdd : "";
-		const border = borderFg ? `${borderFg}${BORDER_BAR}${RST}` : ` ${BG_DEFAULT}`;
+		const border = borderFg ? `${borderFg}${BORDER_BAR}${RST}` : ` ${BG_BASE}`;
 		const numFg = borderFg || FG_LNUM;
 
 		let body: string;
@@ -1143,7 +1171,7 @@ async function renderSplit(
 		} else if (isDel || isAdd) {
 			body = `${cBg}${hl}`;
 		} else {
-			body = `${BG_DEFAULT}${DIM}${hl}`;
+			body = `${BG_BASE}${DIM}${hl}`;
 		}
 
 		const gutter = `${border}${gBg}${lnum(num, nw, numFg)}${sFg}${BOLD}${sign}${RST} ${FG_RULE}│${RST} `;
