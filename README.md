@@ -126,10 +126,10 @@ Override individual diff colors in `.pi/settings.json` using hex `#RRGGBB` value
 
 ### Auto-Derive (Default Behavior)
 
-When no `diffTheme` or `diffColors` is set, pi-diff **automatically derives** background colors from your pi theme's diff foreground colors. This ensures diffs look good with any pi theme and terminal background — no configuration needed.
+When no `diffTheme` or `diffColors` is set, pi-diff **automatically derives** background colors from your pi theme's diff foreground colors and tool-state backgrounds. Added/context surfaces use `toolSuccessBg`; removed surfaces use `toolErrorBg`. This ensures diffs look good with any pi theme and terminal background — no configuration needed.
 
 The auto-derive uses different intensity levels:
-- **Line backgrounds**: 8–10% of the theme's diff fg color (subtle tint)
+- **Line backgrounds**: 8–10% of the theme's diff fg color mixed into the matching tool-state background (subtle tint)
 - **Word highlights**: 20–22% (more visible for changed characters)
 - **Gutters**: 5–6% (subtler than line backgrounds)
 

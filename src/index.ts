@@ -190,8 +190,9 @@ let _autoDerivePending = true;
 let _hasExplicitBgConfig = false;
 
 /** Auto-derive all diff background colors from the pi theme's fg diff colors.
- *  Reads toolSuccessBg as the base and mixes accent colors into it.
- *  Falls back to black (0,0,0) as base if toolSuccessBg is unavailable. */
+ *  Reads toolSuccessBg as the add/context base and toolErrorBg as the delete base,
+ *  then mixes accent colors into each. Falls back to black (0,0,0) when a theme
+ *  background is unavailable; toolErrorBg falls back to toolSuccessBg. */
 function autoDeriveBgFromTheme(theme: any): void {
 	if (!theme?.getFgAnsi) return;
 	try {
@@ -201,34 +202,42 @@ function autoDeriveBgFromTheme(theme: any): void {
 		const delRgb = parseAnsiRgb(fgDel);
 		if (!addRgb || !delRgb) return;
 
-		// Read toolSuccessBg as the base background color
-		let base = { r: 0, g: 0, b: 0 };
+		let addBase = { r: 0, g: 0, b: 0 };
+		let delBase = addBase;
 		if (theme.getBgAnsi) {
 			try {
-				const bgAnsi = theme.getBgAnsi("toolSuccessBg");
-				const parsed = parseAnsiRgb(bgAnsi);
-				if (parsed) {
-					base = parsed;
-					BG_BASE = bgAnsi;
+				const successBgAnsi = theme.getBgAnsi("toolSuccessBg");
+				const successParsed = parseAnsiRgb(successBgAnsi);
+				if (successParsed) {
+					addBase = successParsed;
+					delBase = successParsed;
+					BG_BASE = successBgAnsi;
 				}
 			} catch {
 				/* no toolSuccessBg — use black */
 			}
+
+			try {
+				const errorParsed = parseAnsiRgb(theme.getBgAnsi("toolErrorBg"));
+				if (errorParsed) delBase = errorParsed;
+			} catch {
+				/* no toolErrorBg — use toolSuccessBg/black */
+			}
 		}
 
-		// Line backgrounds — subtle accent mixed into base (8–10%)
-		BG_ADD = mixBg(base, addRgb, 0.08);
-		BG_DEL = mixBg(base, delRgb, 0.1);
+		// Line backgrounds — subtle accent mixed into the matching tool-state base (8–10%)
+		BG_ADD = mixBg(addBase, addRgb, 0.08);
+		BG_DEL = mixBg(delBase, delRgb, 0.1);
 
 		// Word-level highlights — more visible (20–22%)
-		BG_ADD_W = mixBg(base, addRgb, 0.2);
-		BG_DEL_W = mixBg(base, delRgb, 0.22);
+		BG_ADD_W = mixBg(addBase, addRgb, 0.2);
+		BG_DEL_W = mixBg(delBase, delRgb, 0.22);
 
 		// Gutters — subtler than lines (5–6%)
-		BG_GUTTER_ADD = mixBg(base, addRgb, 0.05);
-		BG_GUTTER_DEL = mixBg(base, delRgb, 0.06);
+		BG_GUTTER_ADD = mixBg(addBase, addRgb, 0.05);
+		BG_GUTTER_DEL = mixBg(delBase, delRgb, 0.06);
 
-		// Empty filler and context — match the base
+		// Empty filler and context — match the success/context base
 		BG_EMPTY = BG_BASE;
 
 		// Update RST to re-apply base bg after every reset — prevents black
@@ -467,7 +476,7 @@ let DEFAULT_DIFF_COLORS: DiffColors = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_
 
 /** Resolve diff fg colors from theme (if available), falling back to hardcoded ANSI.
  *  On first call with a valid theme, auto-derives bg colors if no explicit config was set.
- *  Always reads toolSuccessBg for BG_BASE (used for context line backgrounds). */
+ *  Always reads toolSuccessBg for BG_BASE (used for context/add line backgrounds). */
 function resolveDiffColors(theme?: any): DiffColors {
 	// Always read toolSuccessBg for BG_BASE (even with explicit config)
 	if (theme?.getBgAnsi && BG_BASE === BG_DEFAULT) {
