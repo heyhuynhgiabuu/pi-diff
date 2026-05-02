@@ -28,6 +28,24 @@ import { codeToANSI } from "@shikijs/cli";
 import * as Diff from "diff";
 import type { BundledLanguage, BundledTheme } from "shiki";
 
+import { type DiffLine, type ParsedDiff, parseDiff } from "./core/diff.js";
+import { registerReviewDiffCommand } from "./review/command.js";
+import { formatReviewMarkdown } from "./review/export.js";
+import { countReviewDiffLines, type ReviewDiffMode, readGitDiff } from "./review/git.js";
+import {
+	applyDiffPalette as applySharedDiffPalette,
+	lang as detectDiffLanguage,
+	renderSplit as renderSharedSplit,
+	resolveDiffColors as resolveSharedDiffColors,
+	themeCacheKey as sharedThemeCacheKey,
+} from "./review/hunk-preview.js";
+import {
+	createReviewComment,
+	formatInteractiveReviewPanel,
+	formatReviewComments,
+	type ReviewComment,
+} from "./review/interactive.js";
+
 // ---------------------------------------------------------------------------
 // Diff Theme System — presets, auto-derive, and per-color overrides
 //
@@ -473,11 +491,50 @@ interface DiffColors {
 }
 
 let DEFAULT_DIFF_COLORS: DiffColors = { fgAdd: FG_ADD, fgDel: FG_DEL, fgCtx: FG_DIM };
+let _lastResolvedThemeKey = "";
+
+function themeCacheKey(theme?: any): string {
+	if (!theme?.fg) return "no-theme";
+	const fgKeys = [
+		"toolTitle",
+		"accent",
+		"muted",
+		"success",
+		"error",
+		"toolDiffAdded",
+		"toolDiffRemoved",
+		"toolDiffContext",
+	];
+	const bgKeys = ["toolSuccessBg", "toolErrorBg"];
+	const parts: string[] = [];
+	for (const key of fgKeys) {
+		try {
+			parts.push(theme.fg(key, key));
+		} catch {
+			parts.push(key);
+		}
+	}
+	for (const key of bgKeys) {
+		try {
+			parts.push(theme.bg ? theme.bg(key, key) : key);
+		} catch {
+			parts.push(key);
+		}
+	}
+	return parts.join("|");
+}
 
 /** Resolve diff fg colors from theme (if available), falling back to hardcoded ANSI.
  *  On first call with a valid theme, auto-derives bg colors if no explicit config was set.
  *  Always reads toolSuccessBg for BG_BASE (used for context/add line backgrounds). */
 function resolveDiffColors(theme?: any): DiffColors {
+	const currentThemeKey = themeCacheKey(theme);
+	if (!_hasExplicitBgConfig && _lastResolvedThemeKey && _lastResolvedThemeKey !== currentThemeKey) {
+		BG_BASE = BG_DEFAULT;
+		RST = "\x1b[0m";
+		_autoDerivePending = true;
+	}
+	_lastResolvedThemeKey = currentThemeKey;
 	// Always read toolSuccessBg for BG_BASE (even with explicit config)
 	if (theme?.getBgAnsi && BG_BASE === BG_DEFAULT) {
 		try {
@@ -519,24 +576,6 @@ function adaptiveWrapRows(tw?: number): number {
 	if (w >= 180) return MAX_WRAP_ROWS_WIDE;
 	if (w >= 120) return MAX_WRAP_ROWS_MED;
 	return MAX_WRAP_ROWS_NARROW;
-}
-
-// ---------------------------------------------------------------------------
-// Types
-// ---------------------------------------------------------------------------
-
-interface DiffLine {
-	type: "add" | "del" | "ctx" | "sep";
-	oldNum: number | null;
-	newNum: number | null;
-	content: string;
-}
-
-interface ParsedDiff {
-	lines: DiffLine[];
-	added: number;
-	removed: number;
-	chars: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -840,43 +879,6 @@ async function hlBlock(code: string, language: BundledLanguage | undefined): Pro
 	} catch {
 		return code.split("\n");
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Diff parsing
-// ---------------------------------------------------------------------------
-
-function parseDiff(oldContent: string, newContent: string, ctx = 3): ParsedDiff {
-	const patch = Diff.structuredPatch("", "", oldContent, newContent, "", "", { context: ctx });
-	const lines: DiffLine[] = [];
-	let added = 0,
-		removed = 0;
-
-	for (let hi = 0; hi < patch.hunks.length; hi++) {
-		if (hi > 0) {
-			const prev = patch.hunks[hi - 1];
-			const gap = patch.hunks[hi].oldStart - (prev.oldStart + prev.oldLines);
-			lines.push({ type: "sep", oldNum: null, newNum: gap > 0 ? gap : null, content: "" });
-		}
-		const h = patch.hunks[hi];
-		let oL = h.oldStart,
-			nL = h.newStart;
-		for (const raw of h.lines) {
-			if (raw === "\\ No newline at end of file") continue;
-			const ch = raw[0],
-				text = raw.slice(1);
-			if (ch === "+") {
-				lines.push({ type: "add", oldNum: null, newNum: nL++, content: text });
-				added++;
-			} else if (ch === "-") {
-				lines.push({ type: "del", oldNum: oL++, newNum: null, content: text });
-				removed++;
-			} else {
-				lines.push({ type: "ctx", oldNum: oL++, newNum: nL++, content: text });
-			}
-		}
-	}
-	return { lines, added, removed, chars: oldContent.length + newContent.length };
 }
 
 // ---------------------------------------------------------------------------
@@ -1301,17 +1303,67 @@ export const __testing = {
 	renderUnified,
 };
 
-export default function diffRendererExtension(pi: any): void {
-	// Apply diff theme palette from settings/presets before rendering
-	applyDiffPalette();
+interface ReviewGitDiffParams {
+	base?: string;
+	raw?: boolean;
+	includeRawDiff?: boolean;
+	interactive?: boolean;
+	file?: string;
+	hunkId?: string;
+	maxFiles?: number;
+	maxHunks?: number;
+	maxLinesPerHunk?: number;
+}
 
-	let createWriteTool: any, createEditTool: any, TextComponent: any;
+interface ReviewGitCommentParams {
+	file?: string;
+	line?: number;
+	hunkId?: string;
+	body?: string;
+}
+
+interface ReviewGitCommentsParams {
+	clear?: boolean;
+}
+
+function reviewGitDiffMode(params: ReviewGitDiffParams): ReviewDiffMode {
+	const base = typeof params.base === "string" ? params.base.trim() : "";
+	return base ? { type: "branch", base } : { type: "working-tree" };
+}
+
+function reviewGitDiffMaxLines(params: ReviewGitDiffParams): number | undefined {
+	if (params.maxLinesPerHunk === undefined) return undefined;
+	const maxLines = Number(params.maxLinesPerHunk);
+	if (!Number.isInteger(maxLines) || maxLines < 1) {
+		throw new Error("maxLinesPerHunk must be a positive integer");
+	}
+	return maxLines;
+}
+
+function normalizeOptionalPositiveInteger(value: unknown, name: string): number | undefined {
+	if (value === undefined || value === null) return undefined;
+	const number = Number(value);
+	if (!Number.isInteger(number) || number < 1) throw new Error(`${name} must be a positive integer`);
+	return number;
+}
+
+export default async function diffRendererExtension(pi: any): Promise<void> {
+	// Apply diff theme palette from settings/presets before rendering
+	applySharedDiffPalette();
+
+	let createWriteTool: any, createEditTool: any, getMarkdownTheme: any, TextComponent: any, MarkdownComponent: any;
 	try {
-		const sdk = require("@mariozechner/pi-coding-agent");
+		const sdk = await import("@mariozechner/pi-coding-agent");
+		const tui = await import("@mariozechner/pi-tui");
 		createWriteTool = sdk.createWriteTool;
 		createEditTool = sdk.createEditTool;
-		TextComponent = require("@mariozechner/pi-tui").Text;
-	} catch {
+		getMarkdownTheme = sdk.getMarkdownTheme;
+		TextComponent = tui.Text;
+		MarkdownComponent = tui.Markdown;
+	} catch (error) {
+		console.error(
+			`[pi-diff] failed to load Pi SDK dependencies: ${error instanceof Error ? error.message : String(error)}`,
+		);
 		return;
 	}
 	if (!createWriteTool || !createEditTool || !TextComponent) return;
@@ -1319,6 +1371,254 @@ export default function diffRendererExtension(pi: any): void {
 	const cwd = process.cwd();
 	const home = process.env.HOME ?? "";
 	const sp = (p: string) => shortPath(cwd, home, p);
+	const reviewComments: ReviewComment[] = [];
+
+	registerReviewDiffCommand(pi, cwd);
+
+	pi.registerTool({
+		name: "review_git_diff",
+		label: "Review Git Diff",
+		description: `Open a read-only Git diff review panel as markdown inside Pi TUI.
+
+Use this when the agent needs structured Git review context or a non-destructive markdown view of local changes. For the real keyboard-driven local review UI, use the /review-diff command instead. This tool never stages, commits, reverts, discards, or modifies files.
+
+Examples:
+  review_git_diff({})
+  review_git_diff({ base: "main" })
+  review_git_diff({ file: "src/index.ts" })
+  review_git_diff({ file: "src/index.ts", hunkId: "src/index.ts:10:12" })`,
+		promptSnippet:
+			"Open a read-only Git review markdown panel for local changes. Prefer /review-diff for the interactive TUI workflow.",
+		parameters: {
+			type: "object",
+			properties: {
+				base: {
+					type: "string",
+					description:
+						"Optional base branch/ref. Omit for uncommitted working-tree changes; set to main/master/etc. for base...HEAD branch review.",
+				},
+				file: {
+					type: "string",
+					description: "Optional changed file path to focus in the interactive review panel.",
+				},
+				hunkId: {
+					type: "string",
+					description: "Optional hunk id to focus, shown by review_git_diff output.",
+				},
+				includeRawDiff: {
+					type: "boolean",
+					description: "Return legacy raw review markdown instead of the interactive panel when true.",
+				},
+				raw: {
+					type: "boolean",
+					description: "Alias for includeRawDiff.",
+				},
+				maxLinesPerHunk: {
+					type: "number",
+					description: "Optional positive integer limit for lines shown per hunk.",
+				},
+				maxFiles: {
+					type: "number",
+					description: "Optional positive integer limit for files shown in the changed-file sidebar.",
+				},
+				maxHunks: {
+					type: "number",
+					description: "Optional positive integer limit for hunks shown in the focused file view.",
+				},
+			},
+			additionalProperties: false,
+		},
+
+		async execute(_tid: string, params: ReviewGitDiffParams = {}) {
+			try {
+				const safeParams = params ?? {};
+				const diff = await readGitDiff(cwd, reviewGitDiffMode(safeParams));
+				const maxLinesPerHunk = reviewGitDiffMaxLines(safeParams);
+				const markdown =
+					safeParams.includeRawDiff || safeParams.raw
+						? formatReviewMarkdown(diff, { includeRawDiff: true, maxLinesPerHunk })
+						: formatInteractiveReviewPanel(diff, reviewComments, {
+								file: safeParams.file,
+								hunkId: safeParams.hunkId,
+								maxFiles: normalizeOptionalPositiveInteger(safeParams.maxFiles, "maxFiles"),
+								maxHunks: normalizeOptionalPositiveInteger(safeParams.maxHunks, "maxHunks"),
+								maxLinesPerHunk,
+							});
+				const counts = countReviewDiffLines(diff);
+				return {
+					content: [{ type: "text" as const, text: markdown }],
+					details: {
+						_type: "reviewGitDiff",
+						markdown,
+						mode: diff.mode,
+						fileCount: diff.files.length,
+						insertions: counts.insertions,
+						deletions: counts.deletions,
+						commentCount: reviewComments.length,
+						focusedFile: safeParams.file,
+						focusedHunk: safeParams.hunkId,
+					},
+				};
+			} catch (error) {
+				const message = error instanceof Error ? error.message : String(error);
+				return {
+					content: [{ type: "text" as const, text: `Error: ${message}` }],
+					details: { _type: "reviewGitDiff", error: message },
+				};
+			}
+		},
+
+		renderCall(args: ReviewGitDiffParams, theme: any, ctx: any) {
+			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
+			const base = typeof args?.base === "string" && args.base.trim() ? ` vs ${args.base.trim()}` : " working tree";
+			const focus = typeof args?.file === "string" && args.file.trim() ? ` • ${args.file.trim()}` : "";
+			text.setText(`${theme.fg("toolTitle", theme.bold("review_git_diff"))}${theme.fg("muted", `${base}${focus}`)}`);
+			return text;
+		},
+
+		renderResult(result: any, _opt: any, theme: any, ctx: any) {
+			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
+			if (ctx.isError || result.details?.error) {
+				text.setText(`\n${theme.fg("error", result.details?.error ?? "review_git_diff failed")}`);
+				return text;
+			}
+			const details = result.details;
+			if (details?._type === "reviewGitDiff") {
+				if (MarkdownComponent && getMarkdownTheme && typeof details.markdown === "string") {
+					return new MarkdownComponent(details.markdown, 0, 0, getMarkdownTheme());
+				}
+				const summary = `${details.fileCount} files ${summarize(details.insertions ?? 0, details.deletions ?? 0)}`;
+				const comments = details.commentCount ? ` • ${details.commentCount} comments` : "";
+				text.setText(
+					`  ${summary}${theme.fg("muted", comments)}\n${theme.fg("muted", "  Interactive review panel generated in the tool result.")}`,
+				);
+				return text;
+			}
+			text.setText(`  ${theme.fg("muted", "interactive review generated")}`);
+			return text;
+		},
+	});
+
+	pi.registerTool({
+		name: "review_git_comment",
+		label: "Draft Review Comment",
+		description:
+			"Draft an inline code-review comment for the current interactive Git review. This stores comments in memory for the current Pi session and does not modify files or submit anything externally.",
+		promptSnippet: "Draft an inline comment for the current Git review session.",
+		parameters: {
+			type: "object",
+			properties: {
+				file: { type: "string", description: "Changed file path to comment on." },
+				line: { type: "number", description: "Optional old/new line number to comment on." },
+				hunkId: { type: "string", description: "Optional hunk id from review_git_diff output." },
+				body: { type: "string", description: "Comment body." },
+			},
+			required: ["file", "body"],
+			additionalProperties: false,
+		},
+
+		async execute(_tid: string, params: ReviewGitCommentParams) {
+			const file = typeof params?.file === "string" ? params.file.trim() : "";
+			const body = typeof params?.body === "string" ? params.body.trim() : "";
+			if (!file)
+				return {
+					content: [{ type: "text" as const, text: "Error: file is required" }],
+					details: { error: "file required" },
+				};
+			if (!body)
+				return {
+					content: [{ type: "text" as const, text: "Error: body is required" }],
+					details: { error: "body required" },
+				};
+			const comment = createReviewComment({
+				comments: reviewComments,
+				file,
+				body,
+				line: normalizeOptionalPositiveInteger(params.line, "line"),
+				hunkId: typeof params.hunkId === "string" && params.hunkId.trim() ? params.hunkId.trim() : undefined,
+			});
+			reviewComments.push(comment);
+			return {
+				content: [
+					{
+						type: "text" as const,
+						text: `Drafted ${comment.id} on ${comment.file}${comment.line ? `:${comment.line}` : ""}\n\n${comment.body}`,
+					},
+				],
+				details: { _type: "reviewGitComment", comment, commentCount: reviewComments.length },
+			};
+		},
+
+		renderCall(args: ReviewGitCommentParams, theme: any, ctx: any) {
+			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
+			text.setText(
+				`${theme.fg("toolTitle", theme.bold("review_git_comment"))} ${theme.fg("accent", args?.file ?? "")}`,
+			);
+			return text;
+		},
+
+		renderResult(result: any, _opt: any, theme: any, ctx: any) {
+			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
+			if (ctx.isError || result.details?.error) {
+				text.setText(`\n${theme.fg("error", result.details?.error ?? "review_git_comment failed")}`);
+				return text;
+			}
+			const comment = result.details?.comment;
+			text.setText(
+				`  ${theme.fg("success", `✓ drafted ${comment?.id ?? "comment"}`)}${theme.fg("muted", ` (${result.details?.commentCount ?? 0} total)`)}`,
+			);
+			return text;
+		},
+	});
+
+	pi.registerTool({
+		name: "review_git_comments",
+		label: "Review Comments",
+		description: "List or clear drafted interactive Git review comments for the current Pi session.",
+		promptSnippet: "List or clear drafted review comments.",
+		parameters: {
+			type: "object",
+			properties: {
+				clear: { type: "boolean", description: "Clear all drafted comments when true." },
+			},
+			additionalProperties: false,
+		},
+
+		async execute(_tid: string, params: ReviewGitCommentsParams = {}) {
+			if (params?.clear) {
+				const cleared = reviewComments.length;
+				reviewComments.length = 0;
+				return {
+					content: [{ type: "text" as const, text: `Cleared ${cleared} drafted review comments.` }],
+					details: { _type: "reviewGitComments", cleared, commentCount: 0 },
+				};
+			}
+			const markdown = formatReviewComments(reviewComments);
+			return {
+				content: [{ type: "text" as const, text: markdown }],
+				details: { _type: "reviewGitComments", markdown, commentCount: reviewComments.length },
+			};
+		},
+
+		renderCall(_args: ReviewGitCommentsParams, theme: any, ctx: any) {
+			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
+			text.setText(theme.fg("toolTitle", theme.bold("review_git_comments")));
+			return text;
+		},
+
+		renderResult(result: any, _opt: any, theme: any, ctx: any) {
+			if (MarkdownComponent && getMarkdownTheme && typeof result.details?.markdown === "string") {
+				return new MarkdownComponent(result.details.markdown, 0, 0, getMarkdownTheme());
+			}
+			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
+			const cleared =
+				typeof result.details?.cleared === "number"
+					? `cleared ${result.details.cleared}`
+					: `${result.details?.commentCount ?? 0} drafted`;
+			text.setText(`  ${theme.fg("muted", cleared)} review comments`);
+			return text;
+		},
+	});
 
 	// =======================================================================
 	// write
@@ -1345,7 +1645,7 @@ export default function diffRendererExtension(pi: any): void {
 			// Store in details — the only custom field TUI preserves in renderResult
 			if (old !== null && old !== content) {
 				const diff = parseDiff(old, content);
-				const lg = lang(fp);
+				const lg = detectDiffLanguage(fp);
 				(result as any).details = { _type: "diff", summary: summarize(diff.added, diff.removed), diff, language: lg };
 			} else if (old === null) {
 				const lineCount = content ? content.split("\n").length : 0;
@@ -1372,11 +1672,11 @@ export default function diffRendererExtension(pi: any): void {
 
 			// New file preview with Shiki
 			if (args?.content && ctx.argsComplete && isNew) {
-				const previewKey = `create:${fp}:${String(args.content).length}`;
+				const previewKey = `create:${sharedThemeCacheKey(theme)}:${fp}:${String(args.content).length}`;
 				if (ctx.state._previewKey !== previewKey) {
 					ctx.state._previewKey = previewKey;
 					ctx.state._previewText = hdr;
-					const lg = lang(fp);
+					const lg = detectDiffLanguage(fp);
 					hlBlock(args.content, lg)
 						.then((lines: string[]) => {
 							if (ctx.state._previewKey !== previewKey) return;
@@ -1412,12 +1712,12 @@ export default function diffRendererExtension(pi: any): void {
 			const d = result.details;
 			if (d?._type === "diff") {
 				const w = termW();
-				const key = `wd:${w}:${d.summary}:${d.diff?.lines?.length ?? 0}:${d.language ?? ""}`;
+				const key = `wd:${sharedThemeCacheKey(theme)}:${w}:${d.summary}:${d.diff?.lines?.length ?? 0}:${d.language ?? ""}`;
 				if (ctx.state._wdk !== key) {
 					ctx.state._wdk = key;
 					ctx.state._wdt = `  ${d.summary}\n${theme.fg("muted", "  rendering diff…")}`;
-					const dc = resolveDiffColors(theme);
-					renderSplit(d.diff, d.language, MAX_RENDER_LINES, dc)
+					const dc = resolveSharedDiffColors(theme);
+					renderSharedSplit(d.diff, d.language, MAX_RENDER_LINES, dc, w)
 						.then((rendered: string) => {
 							if (ctx.state._wdk !== key) return;
 							ctx.state._wdt = `  ${d.summary}\n${rendered}`;
@@ -1438,11 +1738,11 @@ export default function diffRendererExtension(pi: any): void {
 			}
 			if (d?._type === "new") {
 				const { lines: lineCount, content: rawContent, filePath: fp } = d;
-				const pk = `nf:${fp}:${lineCount}`;
+				const pk = `nf:${sharedThemeCacheKey(theme)}:${fp}:${lineCount}`;
 				if (ctx.state._nfk !== pk) {
 					ctx.state._nfk = pk;
 					ctx.state._nft = `  ${theme.fg("success", `✓ new file (${lineCount} lines)`)}`;
-					const lg = lang(fp);
+					const lg = detectDiffLanguage(fp);
 					if (rawContent) {
 						hlBlock(rawContent, lg)
 							.then((hlLines: string[]) => {
@@ -1550,16 +1850,16 @@ export default function diffRendererExtension(pi: any): void {
 				return text;
 			}
 
-			const pk = JSON.stringify({ fp, operations, w: termW() });
+			const pk = JSON.stringify({ fp, operations, theme: sharedThemeCacheKey(theme), w: termW() });
 			if (ctx.state._pk !== pk) {
 				ctx.state._pk = pk;
 				ctx.state._pt = `${hdr}  ${theme.fg("muted", "(rendering…)")}`;
-				const lg = lang(fp);
-				const dc = resolveDiffColors(theme);
+				const lg = detectDiffLanguage(fp);
+				const dc = resolveSharedDiffColors(theme);
 
 				if (operations.length === 1) {
 					const diff = parseDiff(operations[0].oldText, operations[0].newText);
-					renderSplit(diff, lg, MAX_PREVIEW_LINES, dc)
+					renderSharedSplit(diff, lg, MAX_PREVIEW_LINES, dc, termW())
 						.then((rendered) => {
 							if (ctx.state._pk !== pk) return;
 							ctx.state._pt = `${hdr}\n${summarize(diff.added, diff.removed)}\n${rendered}`;
@@ -1576,7 +1876,7 @@ export default function diffRendererExtension(pi: any): void {
 					const previewLines = Math.max(8, Math.floor(MAX_PREVIEW_LINES / maxShown));
 					Promise.all(
 						diffs.slice(0, maxShown).map((diff, index) =>
-							renderSplit(diff, lg, previewLines, dc)
+							renderSharedSplit(diff, lg, previewLines, dc, termW())
 								.then((rendered) => `Edit ${index + 1}/${operations.length}\n${rendered}`)
 								.catch(() => `Edit ${index + 1}/${operations.length}  ${summarize(diff.added, diff.removed)}`),
 						),
