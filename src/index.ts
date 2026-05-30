@@ -39,12 +39,7 @@ import {
 	resolveDiffColors as resolveSharedDiffColors,
 	themeCacheKey as sharedThemeCacheKey,
 } from "./review/hunk-preview.js";
-import {
-	createReviewComment,
-	formatInteractiveReviewPanel,
-	formatReviewComments,
-	type ReviewComment,
-} from "./review/interactive.js";
+import { formatInteractiveReviewPanel } from "./review/interactive.js";
 
 // ---------------------------------------------------------------------------
 // Diff Theme System — presets, auto-derive, and per-color overrides
@@ -1326,17 +1321,6 @@ interface ReviewGitDiffParams {
 	maxLinesPerHunk?: number;
 }
 
-interface ReviewGitCommentParams {
-	file?: string;
-	line?: number;
-	hunkId?: string;
-	body?: string;
-}
-
-interface ReviewGitCommentsParams {
-	clear?: boolean;
-}
-
 function reviewGitDiffMode(params: ReviewGitDiffParams): ReviewDiffMode {
 	const base = typeof params.base === "string" ? params.base.trim() : "";
 	return base ? { type: "branch", base } : { type: "working-tree" };
@@ -1382,7 +1366,6 @@ export default async function diffRendererExtension(pi: any): Promise<void> {
 	const cwd = process.cwd();
 	const home = process.env.HOME ?? "";
 	const sp = (p: string) => shortPath(cwd, home, p);
-	const reviewComments: ReviewComment[] = [];
 
 	registerReviewDiffCommand(pi, cwd);
 
@@ -1448,7 +1431,7 @@ Examples:
 				const markdown =
 					safeParams.includeRawDiff || safeParams.raw
 						? formatReviewMarkdown(diff, { includeRawDiff: true, maxLinesPerHunk })
-						: formatInteractiveReviewPanel(diff, reviewComments, {
+						: formatInteractiveReviewPanel(diff, [], {
 								file: safeParams.file,
 								hunkId: safeParams.hunkId,
 								maxFiles: normalizeOptionalPositiveInteger(safeParams.maxFiles, "maxFiles"),
@@ -1465,7 +1448,7 @@ Examples:
 						fileCount: diff.files.length,
 						insertions: counts.insertions,
 						deletions: counts.deletions,
-						commentCount: reviewComments.length,
+						commentCount: 0,
 						focusedFile: safeParams.file,
 						focusedHunk: safeParams.hunkId,
 					},
@@ -1506,127 +1489,6 @@ Examples:
 				return text;
 			}
 			text.setText(`  ${theme.fg("muted", "interactive review generated")}`);
-			return text;
-		},
-	});
-
-	pi.registerTool({
-		name: "review_git_comment",
-		label: "Draft Review Comment",
-		description:
-			"Draft an inline code-review comment for the current interactive Git review. This stores comments in memory for the current Pi session and does not modify files or submit anything externally.",
-		promptSnippet: "Draft an inline comment for the current Git review session.",
-		parameters: {
-			type: "object",
-			properties: {
-				file: { type: "string", description: "Changed file path to comment on." },
-				line: { type: "number", description: "Optional old/new line number to comment on." },
-				hunkId: { type: "string", description: "Optional hunk id from review_git_diff output." },
-				body: { type: "string", description: "Comment body." },
-			},
-			required: ["file", "body"],
-			additionalProperties: false,
-		},
-
-		async execute(_tid: string, params: ReviewGitCommentParams) {
-			const file = typeof params?.file === "string" ? params.file.trim() : "";
-			const body = typeof params?.body === "string" ? params.body.trim() : "";
-			if (!file)
-				return {
-					content: [{ type: "text" as const, text: "Error: file is required" }],
-					details: { error: "file required" },
-				};
-			if (!body)
-				return {
-					content: [{ type: "text" as const, text: "Error: body is required" }],
-					details: { error: "body required" },
-				};
-			const comment = createReviewComment({
-				comments: reviewComments,
-				file,
-				body,
-				line: normalizeOptionalPositiveInteger(params.line, "line"),
-				hunkId: typeof params.hunkId === "string" && params.hunkId.trim() ? params.hunkId.trim() : undefined,
-			});
-			reviewComments.push(comment);
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: `Drafted ${comment.id} on ${comment.file}${comment.line ? `:${comment.line}` : ""}\n\n${comment.body}`,
-					},
-				],
-				details: { _type: "reviewGitComment", comment, commentCount: reviewComments.length },
-			};
-		},
-
-		renderCall(args: ReviewGitCommentParams, theme: any, ctx: any) {
-			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
-			text.setText(
-				`${theme.fg("toolTitle", theme.bold("review_git_comment"))} ${theme.fg("accent", args?.file ?? "")}`,
-			);
-			return text;
-		},
-
-		renderResult(result: any, _opt: any, theme: any, ctx: any) {
-			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
-			if (ctx.isError || result.details?.error) {
-				text.setText(`\n${theme.fg("error", result.details?.error ?? "review_git_comment failed")}`);
-				return text;
-			}
-			const comment = result.details?.comment;
-			text.setText(
-				`  ${theme.fg("success", `✓ drafted ${comment?.id ?? "comment"}`)}${theme.fg("muted", ` (${result.details?.commentCount ?? 0} total)`)}`,
-			);
-			return text;
-		},
-	});
-
-	pi.registerTool({
-		name: "review_git_comments",
-		label: "Review Comments",
-		description: "List or clear drafted interactive Git review comments for the current Pi session.",
-		promptSnippet: "List or clear drafted review comments.",
-		parameters: {
-			type: "object",
-			properties: {
-				clear: { type: "boolean", description: "Clear all drafted comments when true." },
-			},
-			additionalProperties: false,
-		},
-
-		async execute(_tid: string, params: ReviewGitCommentsParams = {}) {
-			if (params?.clear) {
-				const cleared = reviewComments.length;
-				reviewComments.length = 0;
-				return {
-					content: [{ type: "text" as const, text: `Cleared ${cleared} drafted review comments.` }],
-					details: { _type: "reviewGitComments", cleared, commentCount: 0 },
-				};
-			}
-			const markdown = formatReviewComments(reviewComments);
-			return {
-				content: [{ type: "text" as const, text: markdown }],
-				details: { _type: "reviewGitComments", markdown, commentCount: reviewComments.length },
-			};
-		},
-
-		renderCall(_args: ReviewGitCommentsParams, theme: any, ctx: any) {
-			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
-			text.setText(theme.fg("toolTitle", theme.bold("review_git_comments")));
-			return text;
-		},
-
-		renderResult(result: any, _opt: any, theme: any, ctx: any) {
-			if (MarkdownComponent && getMarkdownTheme && typeof result.details?.markdown === "string") {
-				return new MarkdownComponent(result.details.markdown, 0, 0, getMarkdownTheme());
-			}
-			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
-			const cleared =
-				typeof result.details?.cleared === "number"
-					? `cleared ${result.details.cleared}`
-					: `${result.details?.commentCount ?? 0} drafted`;
-			text.setText(`  ${theme.fg("muted", cleared)} review comments`);
 			return text;
 		},
 	});

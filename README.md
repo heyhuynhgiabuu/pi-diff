@@ -44,16 +44,34 @@ pi -e ./src/index.ts
 
 ## Git Review in Pi TUI
 
-pi-diff now has two review paths:
+pi-diff provides two review surfaces:
 
-1. **`/review-diff`** — the primary interactive local-review command
-2. **`review_git_diff`** — the read-only markdown/tooling path for agent context and scripted review
+1. **`/review-diff`** — the primary interactive local-review command. If [Hunk](https://github.com/modem-dev/hunk) is installed, pi-diff opens Hunk's review-first TUI.
+2. **`review_git_diff`** — a read-only markdown/tool path for agent context and scripted review.
 
-### `/review-diff` — interactive local review
+### Install Hunk for `/review-diff`
 
-Use `/review-diff` inside Pi TUI to open a full-width centered review overlay for your local Git diff.
+`/review-diff` works best with Hunk installed:
 
-<img width="900" alt="pi-diff review-diff interactive Git review overlay" src="media/review-diff.png" />
+```bash
+# npm
+npm i -g hunkdiff
+
+# or Homebrew
+brew install modem-dev/tap/hunk
+```
+
+Verify Hunk is available:
+
+```bash
+hunk --version
+```
+
+If Hunk is not installed, pi-diff falls back to its built-in legacy review overlay and shows a warning.
+
+### `/review-diff` — Hunk-backed interactive review
+
+Run inside Pi:
 
 ```text
 /review-diff
@@ -62,50 +80,87 @@ Use `/review-diff` inside Pi TUI to open a full-width centered review overlay fo
 /review-diff feature/base-branch
 ```
 
-What the overlay supports now:
-- keyboard-driven file navigation
-- hunk navigation for the selected file
-- a fixed-height focused **hunk diff viewport** instead of a panel that grows/shrinks with diff size
-- hunk-level preview scrolling inside the selected hunk, with scroll status and a visible `▶` selection marker
-- load the selected file/line into Pi's main editor as review context
-- copy the selected file/line/hunk reference to the clipboard
-- line-anchored draft/edit/delete review comments
-- approve/dismiss comments before submission
-- batch-submit approved comments back into Pi as a follow-up prompt
-- live auto-refresh while the overlay is open when the local git diff changes
-- manual refresh of the current diff without leaving the review flow
-- session persistence via Pi custom entries so reopening `/review-diff` restores the latest review state for the current session
-
-Key bindings in the overlay:
-- `Tab` cycles focus between files, hunks, preview, and comments
-- `↑↓` / `Ctrl+j` / `Ctrl+k` navigate the focused region; in Preview focus this scrolls the selected hunk while keeping rendered content visible
-- `PageUp` / `PageDown` move by a full visible page in the focused region; in Preview focus this scrolls the selected hunk viewport
-- `Home` / `End` jump to the start/end of the focused region; in Preview focus this jumps within the selected hunk viewport
-- mouse wheel scrolls the selected hunk viewport vertically when Pi forwards terminal wheel events to the overlay
-- `[` / `]` jump between files
-- `o` loads the selected file/line into Pi's main editor as review context
-- `y` copies the selected file/line/hunk reference to the clipboard; if clipboard access fails, it loads the reference into Pi's main editor
-- `c` drafts a comment on the current hunk / anchored preview line
-- `e` edits the selected comment; if none exists yet, the overlay warns instead of silently doing nothing
-- `x` deletes the selected comment
-- `a` approves the selected comment
-- `d` dismisses the selected comment
-- `A` approves all comments
-- `r` manually refreshes the diff immediately (the overlay also auto-refreshes while open)
-- `s` submits approved comments back to Pi
-- `Esc` / `q` closes the overlay
-
-**Important:** `/review-diff` is a command, not a prompt template. Pi resolves extension commands before prompt templates, so a prompt template with the same name would be shadowed and never run.
-
-### `/review-diff-agent` — prompt template companion
-
-If you want a blunt text review from the agent instead of the interactive overlay, use the bundled prompt template:
+What happens:
 
 ```text
-/review-diff-agent
+/review-diff
+  → pi-diff reads the current Git diff
+  → pipes the patch to `hunk patch -`
+  → Hunk opens its sidebar + diff review TUI
+  → when you exit Hunk, pi-diff returns to Pi
 ```
 
-This prompt asks the agent to use `review_git_diff` as needed and produce a brutal review of the current local diff.
+You can test the same Hunk view outside Pi:
+
+```bash
+git diff | hunk patch -
+# or
+hunk diff
+```
+
+Hunk is responsible for the review UI: multi-file sidebar, split/stack layouts, keyboard navigation, mouse support, and agent-note/comment workflows. pi-diff intentionally does **not** maintain a second in-memory comment system.
+
+### Hunk configuration
+
+Hunk reads config from:
+
+```text
+~/.config/hunk/config.toml   # global defaults
+.hunk/config.toml            # repo-local override
+```
+
+Recommended global starter config:
+
+```toml
+# ~/.config/hunk/config.toml
+
+theme = "midnight"      # graphite, midnight, paper, ember, catppuccin-latte, catppuccin-mocha, custom
+mode = "auto"           # auto, split, stack
+vcs = "git"
+watch = false
+
+line_numbers = true
+wrap_lines = false
+agent_notes = true
+exclude_untracked = false
+```
+
+Example repo-local override:
+
+```bash
+mkdir -p .hunk
+$EDITOR .hunk/config.toml
+```
+
+```toml
+# .hunk/config.toml
+
+theme = "graphite"
+mode = "split"
+line_numbers = true
+wrap_lines = false
+agent_notes = true
+```
+
+Hunk also supports custom themes:
+
+```toml
+theme = "custom"
+
+[custom_theme]
+base = "graphite"
+label = "Pi Diff"
+accent = "#7fd1ff"
+panel = "#10161d"
+noteBorder = "#c49bff"
+
+[custom_theme.syntax]
+keyword = "#8ed4ff"
+string = "#c7b4ff"
+comment = "#6e85a7"
+```
+
+All custom theme colors must be `#rrggbb` hex values.
 
 ### `review_git_diff` — read-only markdown review tool
 
@@ -123,13 +178,6 @@ review_git_diff({ file: "src/index.ts" })
 
 // Focus a hunk ID shown by the panel
 review_git_diff({ file: "src/index.ts", hunkId: "src/index.ts:10:12" })
-
-// Draft inline comments through the tool API
-review_git_comment({ file: "src/index.ts", line: 42, body: "This needs a regression test." })
-
-// List or clear drafted comments
-review_git_comments({})
-review_git_comments({ clear: true })
 
 // Return the older full markdown export with raw unified diff included
 review_git_diff({ base: "main", includeRawDiff: true })

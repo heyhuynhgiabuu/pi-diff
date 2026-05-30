@@ -29,6 +29,14 @@ import { ReviewDiffPane, type ReviewDiffPaneAction } from "./tui.js";
 
 const REVIEW_DIFF_POLL_MS = 1000;
 
+type ReviewDiffMessageDetails = {
+	level?: "error" | "warning" | "muted";
+	commentCount?: number;
+	mode?: ReviewDiffMode;
+};
+
+type GitErrorInput = Error | string | { stderr?: string | Buffer; message?: string } | null | undefined;
+
 // ─── Hunk availability cache (checked once per process lifetime) ──────────────
 
 let _hunkAvailable: boolean | undefined = undefined;
@@ -75,11 +83,11 @@ export function registerReviewDiffCommand(pi: ExtensionAPI, cwd: string): void {
 	pi.on?.("session_before_fork", async (_event: SessionBeforeForkEvent, ctx: ExtensionContext) => reconstruct(ctx));
 	pi.on?.("session_tree", async (_event: SessionTreeEvent, ctx: ExtensionContext) => reconstruct(ctx));
 
-	pi.registerMessageRenderer?.("review-diff-submit", (message: { content: string | Array<{ type: string; text?: string }>; details?: Record<string, unknown> }, _options: MessageRenderOptions, theme: Theme) => {
+	pi.registerMessageRenderer?.("review-diff-submit", (message: { content: string | Array<{ type: string; text?: string }>; details?: ReviewDiffMessageDetails }, _options: MessageRenderOptions, theme: Theme) => {
 		const text = typeof message.content === "string" ? message.content : message.content.map((c) => c.text ?? "").join("");
 		return new Text(theme.fg("success", theme.bold("review-diff ")) + text, 0, 0);
 	});
-	pi.registerMessageRenderer?.("review-diff-status", (message: { content: string | Array<{ type: string; text?: string }>; details?: Record<string, unknown> }, _options: MessageRenderOptions, theme: Theme) => {
+	pi.registerMessageRenderer?.("review-diff-status", (message: { content: string | Array<{ type: string; text?: string }>; details?: ReviewDiffMessageDetails }, _options: MessageRenderOptions, theme: Theme) => {
 		const text = typeof message.content === "string" ? message.content : message.content.map((c) => c.text ?? "").join("");
 		const level =
 			message.details?.level === "error" ? "error" : message.details?.level === "warning" ? "warning" : "muted";
@@ -447,11 +455,11 @@ function loadReviewDiff(
 	try {
 		return { ok: true, diff: readGitDiff(cwd, mode) };
 	} catch (error) {
-		return { ok: false, message: formatReviewDiffError(error, mode) };
+		return { ok: false, message: formatReviewDiffError(error as GitErrorInput, mode) };
 	}
 }
 
-function formatReviewDiffError(error: unknown, mode: ReviewDiffMode): string {
+function formatReviewDiffError(error: GitErrorInput, mode: ReviewDiffMode): string {
 	const target = mode.type === "branch" ? `${mode.base}...HEAD` : "working tree";
 	const detail = extractGitErrorDetail(error);
 	if (!detail) {
@@ -469,9 +477,10 @@ function formatReviewDiffError(error: unknown, mode: ReviewDiffMode): string {
 	return `Could not read git diff for ${target}: ${detail}`;
 }
 
-function extractGitErrorDetail(error: unknown): string {
+function extractGitErrorDetail(error: GitErrorInput): string {
+	if (error instanceof Error) return error.message;
 	if (!error || typeof error !== "object") {
-		return error instanceof Error ? error.message : String(error ?? "").trim();
+		return String(error ?? "").trim();
 	}
 	const stderr = "stderr" in error ? error.stderr : undefined;
 	if (typeof stderr === "string" && stderr.trim()) return stderr.trim();

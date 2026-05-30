@@ -6,7 +6,7 @@
  * after the review completes.
  */
 
-import { spawn, execSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -22,6 +22,18 @@ export interface HunkReviewResult {
 	comments?: HunkComment[];
 }
 
+interface HunkRawComment {
+	filePath?: string;
+	file_path?: string;
+	file?: string;
+	newLine?: number | string;
+	new_line?: number | string;
+	oldLine?: number | string;
+	old_line?: number | string;
+	summary?: string;
+	comment?: string;
+}
+
 // ─── Availability Check ──────────────────────────────────────────────────────
 
 /**
@@ -32,7 +44,7 @@ export interface HunkReviewResult {
  */
 export async function checkHunkAvailable(): Promise<boolean> {
 	try {
-		execSync("hunk --version", { stdio: "ignore", timeout: 5000 });
+		execFileSync("hunk", ["--version"], { stdio: "ignore", timeout: 5000 });
 		return true;
 	} catch {
 		return false;
@@ -49,9 +61,9 @@ export async function checkHunkAvailable(): Promise<boolean> {
  */
 export function parseHunkComments(rawJson: string): HunkComment[] {
 	try {
-		const parsed = JSON.parse(rawJson);
+		const parsed = JSON.parse(rawJson) as HunkRawComment[];
 		if (!Array.isArray(parsed)) return [];
-		return parsed.map((item: Record<string, unknown>) => ({
+		return parsed.map((item) => ({
 			filePath: String(item.filePath ?? item.file_path ?? item.file ?? ""),
 			newLine: Number(item.newLine ?? item.new_line ?? 0),
 			oldLine: Number(item.oldLine ?? item.old_line ?? 0),
@@ -71,7 +83,7 @@ export function parseHunkComments(rawJson: string): HunkComment[] {
  */
 export function extractComments(cwd: string): HunkComment[] {
 	try {
-		const stdout = execSync(`hunk session comment list --repo ${JSON.stringify(cwd)} --json`, {
+		const stdout = execFileSync("hunk", ["session", "comment", "list", "--repo", cwd, "--json"], {
 			cwd,
 			encoding: "utf-8",
 			timeout: 15_000,
