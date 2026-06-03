@@ -1,6 +1,6 @@
 {
 	"name": "@heyhuynhgiabuu/pi-diff",
-	"version": "0.5.0",
+	"version": "0.5.1",
 	"type": "module",
 	"description": "Shiki-powered terminal diff renderer for pi — syntax-highlighted, word-level diffs in split and unified views.",
 	"author": "huynhgiabuu",
