@@ -1,0 +1,44 @@
+{
+  "$schema": "./pi-diff.schema.json",
+
+  "_readme": "────────────────────────────────────────────────────────────────",
+  "_readme2": "  pi-diff Configuration                                         ",
+  "_readme3": "  Copy this file to your project root as pi-diff.json.         ",
+  "_readme4": "  All fields are optional — defaults apply for omitted values. ",
+  "_readme5": "                                                                ",
+  "_readme6": "  Priority (highest wins):                                     ",
+  "_readme7": "    1. Environment variable (PI_DIFF_*)                        ",
+  "_readme8": "    2. Project-level: ./pi-diff.json                           ",
+  "_readme9": "    3. Global: ~/.pi/agent/pi-diff.json                              ",
+  "_readme10": "    4. Hardcoded defaults                                     ",
+  "_readme11": "────────────────────────────────────────────────────────────────",
+
+  "sepStyle": "auto",
+  "lineNumbers": true,
+  "indicatorStyle": "bar",
+  "longLines": "wrap",
+  "fileHeader": true,
+  "theme": "default",
+  "shikiTheme": "github-dark",
+
+  "colors": {
+    "bgAdd": "#162620",
+    "bgDel": "#2d1919",
+    "bgAddHighlight": "#234b32",
+    "bgDelHighlight": "#502323",
+    "bgGutterAdd": "#12201a",
+    "bgGutterDel": "#261616",
+    "bgEmpty": "#121212",
+    "fgDim": "#505050",
+    "fgLnum": "#646464",
+    "fgRule": "#323232",
+    "fgStripe": "#282828",
+    "fgSafeMuted": "#8b949e"
+  },
+
+  "splitMinWidth": 150,
+  "splitMinCodeWidth": 60,
+  "maxPreviewLines": 60,
+  "maxRenderLines": 150,
+  "wordDiffMinSimilarity": 0.15
+}

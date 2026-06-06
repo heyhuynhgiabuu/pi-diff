@@ -168,19 +168,19 @@ All custom theme colors must be `#rrggbb` hex values.
 
 ```ts
 // Open the read-only review markdown for working-tree changes, including untracked files
-review_git_diff({})
+review_git_diff({});
 
 // Review branch changes as main...HEAD
-review_git_diff({ base: "main" })
+review_git_diff({ base: "main" });
 
 // Focus a file from the changed-file list
-review_git_diff({ file: "src/index.ts" })
+review_git_diff({ file: "src/index.ts" });
 
 // Focus a hunk ID shown by the panel
-review_git_diff({ file: "src/index.ts", hunkId: "src/index.ts:10:12" })
+review_git_diff({ file: "src/index.ts", hunkId: "src/index.ts:10:12" });
 
 // Return the older full markdown export with raw unified diff included
-review_git_diff({ base: "main", includeRawDiff: true })
+review_git_diff({ base: "main", includeRawDiff: true });
 ```
 
 - No `base` means working-tree review, including untracked files.
@@ -228,12 +228,13 @@ New content ──┘                                          │
 
 ### Views
 
-| View | Used by | Description |
-|------|---------|-------------|
-| **Split** | `edit` tool | Side-by-side with old on left, new on right. Diagonal stripes fill empty slots. Auto-falls back to unified when terminal < 150 cols or > 20% of lines would wrap. |
-| **Unified** | `write` tool | Single column with `+`/`-` gutter. Compact, works at any terminal width. |
+| View        | Used by      | Description                                                                                                                                                       |
+| ----------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Split**   | `edit` tool  | Side-by-side with old on left, new on right. Diagonal stripes fill empty slots. Auto-falls back to unified when terminal < 150 cols or > 20% of lines would wrap. |
+| **Unified** | `write` tool | Single column with `+`/`-` gutter. Compact, works at any terminal width.                                                                                          |
 
 Both views show:
+
 - Colored border bars (`▌`) for changed lines
 - Line numbers in the gutter
 - Hunk separators (`··· N unmodified lines ···`)
@@ -252,12 +253,12 @@ pi-diff ships with built-in theme presets optimized for different terminal backg
 }
 ```
 
-| Preset | Best for | Description |
-|--------|----------|-------------|
-| `default` | Dark theme bases (~`#1e1e2e`) | Original pi-diff colors — balanced contrast |
-| `midnight` | Pure black (`#000000`) terminals | Subtle tints that don't overwhelm on black |
-| `subtle` | Any dark theme | Minimal backgrounds — barely-there tints for a clean look |
-| `neon` | Low-contrast displays | Higher contrast backgrounds for better visibility |
+| Preset     | Best for                         | Description                                               |
+| ---------- | -------------------------------- | --------------------------------------------------------- |
+| `default`  | Dark theme bases (~`#1e1e2e`)    | Original pi-diff colors — balanced contrast               |
+| `midnight` | Pure black (`#000000`) terminals | Subtle tints that don't overwhelm on black                |
+| `subtle`   | Any dark theme                   | Minimal backgrounds — barely-there tints for a clean look |
+| `neon`     | Low-contrast displays            | Higher contrast backgrounds for better visibility         |
 
 ### Per-Color Overrides
 
@@ -294,6 +295,7 @@ Override individual diff colors in `.pi/settings.json` using hex `#RRGGBB` value
 When no `diffTheme` or `diffColors` is set, pi-diff **automatically derives** background colors from your pi theme's diff foreground colors and tool-state backgrounds. Added/context surfaces use `toolSuccessBg`; removed surfaces use `toolErrorBg`. This ensures diffs look good with any pi theme and terminal background — no configuration needed.
 
 The auto-derive uses different intensity levels:
+
 - **Line backgrounds**: 8–10% of the theme's diff fg color mixed into the matching tool-state background (subtle tint)
 - **Word highlights**: 20–22% (more visible for changed characters)
 - **Gutters**: 5–6% (subtler than line backgrounds)
@@ -314,31 +316,31 @@ All settings are also controllable via environment variables. Add them to your s
 
 ### Theme
 
-| Variable | Default | Description |
-|----------|---------|-------------|
+| Variable     | Default       | Description                                                            |
+| ------------ | ------------- | ---------------------------------------------------------------------- |
 | `DIFF_THEME` | `github-dark` | Shiki theme name (e.g., `dracula`, `one-dark-pro`, `catppuccin-mocha`) |
 
 ### Colors
 
 Override any diff color with hex `#RRGGBB` format:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DIFF_BG_ADD` | `#162620` | Background for added lines |
-| `DIFF_BG_DEL` | `#2d1919` | Background for removed lines |
-| `DIFF_BG_ADD_HL` | `#234b32` | Word-level emphasis on added text |
-| `DIFF_BG_DEL_HL` | `#502323` | Word-level emphasis on removed text |
-| `DIFF_BG_GUTTER_ADD` | `#12201a` | Gutter background for added lines |
-| `DIFF_BG_GUTTER_DEL` | `#261616` | Gutter background for removed lines |
-| `DIFF_FG_ADD` | `#64b478` | Foreground for `+` signs and add indicators |
-| `DIFF_FG_DEL` | `#c86464` | Foreground for `-` signs and del indicators |
+| Variable             | Default   | Description                                 |
+| -------------------- | --------- | ------------------------------------------- |
+| `DIFF_BG_ADD`        | `#162620` | Background for added lines                  |
+| `DIFF_BG_DEL`        | `#2d1919` | Background for removed lines                |
+| `DIFF_BG_ADD_HL`     | `#234b32` | Word-level emphasis on added text           |
+| `DIFF_BG_DEL_HL`     | `#502323` | Word-level emphasis on removed text         |
+| `DIFF_BG_GUTTER_ADD` | `#12201a` | Gutter background for added lines           |
+| `DIFF_BG_GUTTER_DEL` | `#261616` | Gutter background for removed lines         |
+| `DIFF_FG_ADD`        | `#64b478` | Foreground for `+` signs and add indicators |
+| `DIFF_FG_DEL`        | `#c86464` | Foreground for `-` signs and del indicators |
 
 ### Layout
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DIFF_SPLIT_MIN_WIDTH` | `150` | Minimum terminal columns to use split view |
-| `DIFF_SPLIT_MIN_CODE_WIDTH` | `60` | Minimum code columns per side in split view |
+| Variable                    | Default | Description                                 |
+| --------------------------- | ------- | ------------------------------------------- |
+| `DIFF_SPLIT_MIN_WIDTH`      | `150`   | Minimum terminal columns to use split view  |
+| `DIFF_SPLIT_MIN_CODE_WIDTH` | `60`    | Minimum code columns per side in split view |
 
 ### Example `.envrc`
 
@@ -363,26 +365,26 @@ src/
 
 ### Key internals
 
-| Component | Purpose |
-|-----------|---------|
-| `parseDiff()` | Converts old/new content to structured `DiffLine[]` using `diff.structuredPatch` |
-| `hlBlock()` | Shiki ANSI highlighting with LRU cache (192 entries) |
-| `injectBg()` | Composites diff backgrounds into Shiki ANSI output (fg + bg layering) |
-| `wordDiffAnalysis()` | Single-pass word diff → similarity score + character ranges |
-| `renderSplit()` | Side-by-side renderer with diagonal stripe fillers |
-| `renderUnified()` | Stacked single-column renderer |
-| `wrapAnsi()` | ANSI-aware line wrapping with state carry-forward |
-| `shouldUseSplit()` | Heuristic: split vs unified based on terminal width and wrap ratio |
+| Component            | Purpose                                                                          |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `parseDiff()`        | Converts old/new content to structured `DiffLine[]` using `diff.structuredPatch` |
+| `hlBlock()`          | Shiki ANSI highlighting with LRU cache (192 entries)                             |
+| `injectBg()`         | Composites diff backgrounds into Shiki ANSI output (fg + bg layering)            |
+| `wordDiffAnalysis()` | Single-pass word diff → similarity score + character ranges                      |
+| `renderSplit()`      | Side-by-side renderer with diagonal stripe fillers                               |
+| `renderUnified()`    | Stacked single-column renderer                                                   |
+| `wrapAnsi()`         | ANSI-aware line wrapping with state carry-forward                                |
+| `shouldUseSplit()`   | Heuristic: split vs unified based on terminal width and wrap ratio               |
 
 ### Rendering constants
 
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `MAX_PREVIEW_LINES` | 60 | Max lines in edit preview (split view) |
-| `MAX_RENDER_LINES` | 150 | Max lines in write result (unified view) |
-| `MAX_HL_CHARS` | 80,000 | Skip syntax highlighting above this |
-| `CACHE_LIMIT` | 192 | LRU cache entries for highlighted blocks |
-| `WORD_DIFF_MIN_SIM` | 0.15 | Minimum similarity for word-level emphasis |
+| Constant            | Value  | Description                                |
+| ------------------- | ------ | ------------------------------------------ |
+| `MAX_PREVIEW_LINES` | 60     | Max lines in edit preview (split view)     |
+| `MAX_RENDER_LINES`  | 150    | Max lines in write result (unified view)   |
+| `MAX_HL_CHARS`      | 80,000 | Skip syntax highlighting above this        |
+| `CACHE_LIMIT`       | 192    | LRU cache entries for highlighted blocks   |
+| `WORD_DIFF_MIN_SIM` | 0.15   | Minimum similarity for word-level emphasis |
 
 ## Exports
 
@@ -391,7 +393,8 @@ The extension exports a `__testing` object for unit testing:
 ```typescript
 import { __testing } from "@heyhuynhgiabuu/pi-diff";
 
-const { parseDiff, renderSplit, renderUnified, normalizeShikiContrast } = __testing;
+const { parseDiff, renderSplit, renderUnified, normalizeShikiContrast } =
+  __testing;
 ```
 
 ## Development
@@ -437,7 +440,8 @@ export default function piDiffExtension(pi: any): void {
 ```
 
 Extensions can:
-- **Register tools** — `pi.registerTool(definition)` 
+
+- **Register tools** — `pi.registerTool(definition)`
 - **Listen to events** — `pi.on("session_start" | "input" | "before_tool_call" | ...)`
 - **Register commands** — `pi.registerCommand("/name", handler)`
 - **Register providers** — `pi.registerProvider("name", config)`

@@ -1,0 +1,172 @@
+{
+	"$schema": "http://json-schema.org/draft-07/schema#",
+	"$id": "https://raw.githubusercontent.com/buddingnewinsights/pi-diff/main/pi-diff.schema.json",
+	"title": "pi-diff Configuration",
+	"description": "Configuration schema for pi-diff — a Shiki-powered terminal diff renderer for pi.",
+	"type": "object",
+	"properties": {
+		"sepStyle": {
+			"description": "How collapsed context between hunks is rendered. Auto shows function context + gap when both available.",
+			"type": "string",
+			"enum": ["auto", "simple", "gap", "context", "metadata"],
+			"default": "auto"
+		},
+		"lineNumbers": {
+			"description": "Show line numbers in the gutter column.",
+			"type": "boolean",
+			"default": true
+		},
+		"indicatorStyle": {
+			"description": "Left-edge visual indicator for changed lines.",
+			"type": "string",
+			"enum": ["bar", "classic", "none"],
+			"default": "bar"
+		},
+		"longLines": {
+			"description": "How to handle content wider than the terminal.",
+			"type": "string",
+			"enum": ["wrap", "scroll"],
+			"default": "wrap"
+		},
+		"fileHeader": {
+			"description": "Show a header line with filename and +/- change statistics.",
+			"type": "boolean",
+			"default": true
+		},
+		"theme": {
+			"description": "Named color preset for diff backgrounds. Any string is accepted as a preset name; built-in presets are: default, midnight, subtle, neon. When the preset is unknown, colors are auto-derived from the active Pi theme.",
+			"type": "string",
+			"default": "default",
+			"examples": ["default", "midnight", "subtle", "neon", "pierre", "pierre-light"]
+		},
+		"shikiTheme": {
+			"description": "Shiki syntax highlighting theme name. See https://shiki.style/themes for available themes.",
+			"type": "string",
+			"default": "github-dark",
+			"examples": ["github-dark", "github-light", "nord", "one-dark-pro", "dracula", "min-light"]
+		},
+		"colors": {
+			"description": "Per-color hex overrides (#RRGGBB). Each color can be individually overridden. These take priority over the named theme.",
+			"type": "object",
+			"properties": {
+				"bgAdd": {
+					"description": "Background for added lines.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#162620"
+				},
+				"bgDel": {
+					"description": "Background for deleted lines.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#2d1919"
+				},
+				"bgAddHighlight": {
+					"description": "Word-level highlight background for added characters.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#234b32"
+				},
+				"bgDelHighlight": {
+					"description": "Word-level highlight background for deleted characters.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#502323"
+				},
+				"bgGutterAdd": {
+					"description": "Gutter background for added lines.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#12201a"
+				},
+				"bgGutterDel": {
+					"description": "Gutter background for deleted lines.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#261616"
+				},
+				"bgEmpty": {
+					"description": "Filler background for empty space in split view (shorter side).",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#121212"
+				},
+				"fgAdd": {
+					"description": "Foreground for added lines (overrides syntax highlighting). Usually left null.",
+					"type": ["string", "null"],
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": null
+				},
+				"fgDel": {
+					"description": "Foreground for deleted lines (overrides syntax highlighting). Usually left null.",
+					"type": ["string", "null"],
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": null
+				},
+				"fgDim": {
+					"description": "Foreground for dim/muted text.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#505050"
+				},
+				"fgLnum": {
+					"description": "Foreground for line numbers.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#646464"
+				},
+				"fgRule": {
+					"description": "Foreground for horizontal rule/border lines.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#323232"
+				},
+				"fgStripe": {
+					"description": "Foreground for diagonal stripe fill (split view empty space).",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#282828"
+				},
+				"fgSafeMuted": {
+					"description": "Safe fallback foreground for low-contrast syntax tokens.",
+					"type": "string",
+					"pattern": "^#[0-9a-fA-F]{6}$",
+					"default": "#8b949e"
+				}
+			},
+			"additionalProperties": false
+		},
+		"splitMinWidth": {
+			"description": "Minimum terminal width (in columns) to prefer split view over unified.",
+			"type": "integer",
+			"minimum": 80,
+			"default": 150
+		},
+		"splitMinCodeWidth": {
+			"description": "Minimum code-column width per side in split view before falling back to unified.",
+			"type": "integer",
+			"minimum": 40,
+			"default": 60
+		},
+		"maxPreviewLines": {
+			"description": "Maximum diff lines shown in edit-tool preview.",
+			"type": "integer",
+			"minimum": 10,
+			"default": 60
+		},
+		"maxRenderLines": {
+			"description": "Maximum diff lines shown in write-tool output.",
+			"type": "integer",
+			"minimum": 10,
+			"default": 150
+		},
+		"wordDiffMinSimilarity": {
+			"description": "Minimum similarity ratio (0.0–1.0) for word-diff emphasis to activate. Higher values restrict word-diff to more similar lines.",
+			"type": "number",
+			"minimum": 0.0,
+			"maximum": 1.0,
+			"default": 0.15
+		}
+	},
+	"additionalProperties": false
+}
