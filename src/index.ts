@@ -31,9 +31,9 @@ import type { Component } from "@earendil-works/pi-tui";
 
 import { computeHunkBlocks, type DiffLine, type ParsedDiff, getSepStyle, parseDiff, parsePatchFiles, resolveSepStyle, sepLabelSplit, sepLabelUnified } from "./core/diff.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { resolveLines, resolveLinesFromPatch } from "./core/resolve-lines.js";
 import { registerReviewDiffCommand } from "./review/command.js";
-import { formatReviewMarkdown } from "./review/export.js";
-import { countReviewDiffLines, type ReviewDiffMode, readGitDiff } from "./review/git.js";
+
 import {
 	applyDiffPalette as applySharedDiffPalette,
 	lang as detectDiffLanguage,
@@ -41,7 +41,7 @@ import {
 	resolveDiffColors as resolveSharedDiffColors,
 	themeCacheKey as sharedThemeCacheKey,
 } from "./review/hunk-preview.js";
-import { formatInteractiveReviewPanel } from "./review/interactive.js";
+
 
 /** Simplified Pi theme — only methods pi-diff actually calls. */
 interface PiTheme {
@@ -1328,38 +1328,7 @@ export const __testing = {
 	renderUnified,
 };
 
-interface ReviewGitDiffParams {
-	base?: string;
-	raw?: boolean;
-	includeRawDiff?: boolean;
-	interactive?: boolean;
-	file?: string;
-	hunkId?: string;
-	maxFiles?: number;
-	maxHunks?: number;
-	maxLinesPerHunk?: number;
-}
 
-function reviewGitDiffMode(params: ReviewGitDiffParams): ReviewDiffMode {
-	const base = typeof params.base === "string" ? params.base.trim() : "";
-	return base ? { type: "branch", base } : { type: "working-tree" };
-}
-
-function reviewGitDiffMaxLines(params: ReviewGitDiffParams): number | undefined {
-	if (params.maxLinesPerHunk === undefined) return undefined;
-	const maxLines = Number(params.maxLinesPerHunk);
-	if (!Number.isInteger(maxLines) || maxLines < 1) {
-		throw new Error("maxLinesPerHunk must be a positive integer");
-	}
-	return maxLines;
-}
-
-function normalizeOptionalPositiveInteger(value: unknown, name: string): number | undefined {
-	if (value === undefined || value === null) return undefined;
-	const number = Number(value);
-	if (!Number.isInteger(number) || number < 1) throw new Error(`${name} must be a positive integer`);
-	return number;
-}
 
 export default async function diffRendererExtension(pi: ExtensionAPI): Promise<void> {
 	// Apply diff theme palette from settings/presets before rendering
@@ -1440,131 +1409,139 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 
 	registerReviewDiffCommand(pi, cwd);
 
-	pi.registerTool({
-		name: "review_git_diff",
-		label: "Review Git Diff",
-		description: `Open a read-only Git diff review panel as markdown inside Pi TUI.
+	// ── resolve_lines tool ────────────────────────────────────────────────
 
-Use this when the agent needs structured Git review context or a non-destructive markdown view of local changes. For the real keyboard-driven local review UI, use the /review-diff command instead. This tool never stages, commits, reverts, discards, or modifies files.
+	pi.registerTool({
+		name: "resolve_lines",
+		label: "Resolve Lines",
+		description: `Resolve line numbers for an LLM code-review comment by matching its existing_code snippet against the git diff hunks. Uses a three-tier algorithm: new-side hunk match, old-side hunk match, then full file-content scan. Returns \`startLine\` and \`endLine\` when found, or \`unresolved: true\` when the snippet cannot be located.
+
+Three-tier resolution:
+  1. Match against diff hunks (new-file side) — context + added lines
+  2. Match against diff hunks (old-file side) — context + deleted lines
+  3. Scan full file content for a consecutive line match
+
+Use after receiving a review comment with \`existing_code\` but zero or drifted line numbers. The tool fetches the current git diff for the file automatically when \`patchText\` is omitted.
 
 Examples:
-  review_git_diff({})
-  review_git_diff({ base: "main" })
-  review_git_diff({ file: "src/index.ts" })
-  review_git_diff({ file: "src/index.ts", hunkId: "src/index.ts:10:12" })`,
-		promptSnippet:
-			"Open a read-only Git review markdown panel for local changes. Prefer /review-diff for the interactive TUI workflow.",
+  resolve_lines({ existingCode: "const x = 1;", filePath: "src/index.ts" })
+  resolve_lines({ existingCode: "function foo() {", filePath: "src/utils.ts", patchText: "@@ -1,3 +1,4 @@..." })`,
+		promptSnippet: "Resolve line numbers for an LLM review comment by matching existing_code against git diff hunks.",
 		parameters: {
 			type: "object",
 			properties: {
-				base: {
+				existingCode: {
 					type: "string",
-					description:
-						"Optional base branch/ref. Omit for uncommitted working-tree changes; set to main/master/etc. for base...HEAD branch review.",
+					description: "The code snippet from the LLM review comment that shows the problematic code. Required.",
 				},
-				file: {
+				filePath: {
 					type: "string",
-					description: "Optional changed file path to focus in the interactive review panel.",
+					description: "Path to the file this comment is about, relative to repo root. Required.",
 				},
-				hunkId: {
+				patchText: {
 					type: "string",
-					description: "Optional hunk id to focus, shown by review_git_diff output.",
+					description: "Optional raw unified diff text for the file. When omitted, pi-diff fetches the git diff automatically.",
 				},
-				includeRawDiff: {
-					type: "boolean",
-					description: "Return legacy raw review markdown instead of the interactive panel when true.",
-				},
-				raw: {
-					type: "boolean",
-					description: "Alias for includeRawDiff.",
-				},
-				maxLinesPerHunk: {
-					type: "number",
-					description: "Optional positive integer limit for lines shown per hunk.",
-				},
-				maxFiles: {
-					type: "number",
-					description: "Optional positive integer limit for files shown in the changed-file sidebar.",
-				},
-				maxHunks: {
-					type: "number",
-					description: "Optional positive integer limit for hunks shown in the focused file view.",
+				fileContent: {
+					type: "string",
+					description: "Optional full new-file content for fallback line scan after hunk matching fails.",
 				},
 			},
+			required: ["existingCode", "filePath"],
 			additionalProperties: false,
 		},
 
 		async execute(_tid: string, params: any = {}): Promise<any> {
 			try {
-				const safeParams = (params ?? {}) as ReviewGitDiffParams;
-				const diff = await readGitDiff(cwd, reviewGitDiffMode(safeParams));
-				const maxLinesPerHunk = reviewGitDiffMaxLines(safeParams);
-				const markdown =
-					safeParams.includeRawDiff || safeParams.raw
-						? formatReviewMarkdown(diff, { includeRawDiff: true, maxLinesPerHunk })
-						: formatInteractiveReviewPanel(diff, [], {
-								file: safeParams.file,
-								hunkId: safeParams.hunkId,
-								maxFiles: normalizeOptionalPositiveInteger(safeParams.maxFiles, "maxFiles"),
-								maxHunks: normalizeOptionalPositiveInteger(safeParams.maxHunks, "maxHunks"),
-								maxLinesPerHunk,
-							});
-				const counts = countReviewDiffLines(diff);
+				const { existingCode, filePath, patchText, fileContent } = params ?? {};
+				if (!existingCode || !filePath) {
+					return { content: [{ type: "text" as const, text: "Error: existingCode and filePath are required" }] };
+				}
+
+				// Fetch git diff if patchText not provided
+				let patch = patchText;
+				if (!patch) {
+					const { execFileSync } = await import("node:child_process");
+					try {
+						patch = execFileSync("git", ["diff", "--no-ext-diff", "HEAD", "--", filePath], {
+							cwd,
+							encoding: "utf8",
+							maxBuffer: 1024 * 1024,
+							stdio: ["ignore", "pipe", "pipe"],
+						}).trim();
+						// Also try unstaged diff
+						const unstaged = execFileSync("git", ["diff", "--no-ext-diff", "--", filePath], {
+							cwd,
+							encoding: "utf8",
+							maxBuffer: 1024 * 1024,
+							stdio: ["ignore", "pipe", "pipe"],
+						}).trim();
+						if (unstaged) {
+							patch = patch ? [patch, unstaged].filter(Boolean).join("\n") : unstaged;
+						}
+					} catch {
+						return {
+							content: [{ type: "text" as const, text: `Error: could not read git diff for ${filePath}` }],
+						};
+					}
+				}
+
+				if (!patch) {
+					return {
+						content: [{ type: "text" as const, text: `No diff found for ${filePath} — file may not have changes` }],
+						details: { unresolved: true },
+					};
+				}
+
+				const result = resolveLinesFromPatch(existingCode, patch, fileContent);
+
+				if ("unresolved" in result) {
+					return {
+						content: [{ type: "text" as const, text: `Could not resolve line numbers for existing_code in ${filePath}` }],
+						details: { unresolved: true },
+					};
+				}
+
 				return {
-					content: [{ type: "text" as const, text: markdown }],
-					details: {
-						_type: "reviewGitDiff" as const,
-						markdown,
-						mode: String(diff.mode),
-						fileCount: diff.files.length,
-						insertions: counts.insertions,
-						deletions: counts.deletions,
-						commentCount: 0,
-						focusedFile: safeParams.file,
-						focusedHunk: safeParams.hunkId,
-					error: undefined,
-					},
+					content: [{ type: "text" as const, text: `Resolved ${filePath}:${result.startLine}-${result.endLine}` }],
+					details: { startLine: result.startLine, endLine: result.endLine },
 				};
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);
 				return {
 					content: [{ type: "text" as const, text: `Error: ${message}` }],
-					details: { _type: "reviewGitDiff" as const, markdown: "", mode: "error", fileCount: 0, insertions: 0, deletions: 0, commentCount: 0, focusedFile: undefined, focusedHunk: undefined, error: message },
+					details: { unresolved: true, error: message },
 				};
 			}
 		},
 
-			renderCall(args: Record<string, unknown>, theme: any, ctx: any) {
+		renderCall(args: Record<string, unknown>, theme: any, ctx: any) {
 			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
-			const safeArgs = args as ReviewGitDiffParams;
-			const base = typeof safeArgs?.base === "string" && safeArgs.base.trim() ? ` vs ${safeArgs.base.trim()}` : " working tree";
-			const focus = typeof safeArgs?.file === "string" && safeArgs.file.trim() ? ` • ${safeArgs.file.trim()}` : "";
-			text.setText(`${theme.fg("toolTitle", theme.bold("review_git_diff"))}${theme.fg("muted", `${base}${focus}`)}`);
+			const fp = typeof args?.filePath === "string" ? args.filePath : "";
+			text.setText(`${theme.fg("toolTitle", theme.bold("resolve_lines"))} ${theme.fg("accent", fp)}`);
 			return text;
 		},
 
 		renderResult(result: any, _opt: any, theme: any, ctx: any) {
 			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
 			if (ctx.isError || result.details?.error) {
-				text.setText(`\n${theme.fg("error", result.details?.error ?? "review_git_diff failed")}`);
+				text.setText(`\n${theme.fg("error", result.details?.error ?? "resolve_lines failed")}`);
 				return text;
 			}
-			const details = result.details;
-			if (details?._type === "reviewGitDiff") {
-				if (MarkdownComponent && getMarkdownTheme && typeof details.markdown === "string") {
-					return new MarkdownComponent(details.markdown, 0, 0, getMarkdownTheme());
-				}
-				const summary = `${details.fileCount} files ${summarize(details.insertions ?? 0, details.deletions ?? 0)}`;
-				const comments = details.commentCount ? ` • ${details.commentCount} comments` : "";
-				text.setText(
-					`  ${summary}${theme.fg("muted", comments)}\n${theme.fg("muted", "  Interactive review panel generated in the tool result.")}`,
-				);
+			if (result.details?.unresolved) {
+				text.setText(`  ${theme.fg("muted", "unresolved")}`);
 				return text;
 			}
-			text.setText(`  ${theme.fg("muted", "interactive review generated")}`);
+			if (result.details?.startLine != null) {
+				text.setText(`  ${theme.fg("success", `lines ${result.details.startLine}-${result.details.endLine}`)}`);
+				return text;
+			}
+			text.setText(`  ${theme.fg("dim", String(result?.content?.[0]?.text ?? "").slice(0, 120))}`);
 			return text;
 		},
 	});
+
+
 
 	// =======================================================================
 	// write

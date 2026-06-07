@@ -39,10 +39,6 @@ export function formatInteractiveReviewPanel(
 	lines.push("");
 	lines.push('- Focus a file: `review_git_diff({ file: "path/to/file.ts" })`');
 	lines.push('- Focus a hunk: `review_git_diff({ file: "path/to/file.ts", hunkId: "path:old:new" })`');
-	lines.push('- Draft an inline comment: `review_git_comment({ file: "path", line: 42, body: "..." })`');
-	lines.push("- List drafted comments: `review_git_comments({})`");
-	lines.push("- Clear drafted comments: `review_git_comments({ clear: true })`");
-	lines.push("");
 	lines.push("Destructive actions such as revert/discard are intentionally not implemented yet.");
 	lines.push("");
 
@@ -158,7 +154,7 @@ function formatHunk(file: ReviewFileDiff, hunk: ReviewHunk, maxLines: number): s
 	lines.push("```");
 	lines.push("");
 	lines.push(
-		`Comment here: review_git_comment({ file: "${file.path}", hunkId: "${hunk.id}", line: ${firstChangedLine(hunk) ?? hunk.newStart}, body: "..." })`,
+		`File: ${file.path}, hunk: ${hunk.id}, first changed line: ${firstChangedLine(hunk) ?? hunk.newStart}`,
 	);
 	return lines.join("\n");
 }
