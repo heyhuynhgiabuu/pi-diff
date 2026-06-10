@@ -21,7 +21,7 @@
  *   • Async rendering with invalidate() for non-blocking preview
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, relative } from "node:path";
 
 import { codeToANSI } from "@shikijs/cli";
@@ -34,6 +34,7 @@ import { configIndicatorStyle } from "./core/config.js";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { resolveLines, resolveLinesFromPatch } from "./core/resolve-lines.js";
 import { registerReviewDiffCommand } from "./review/command.js";
+import { replace } from "./core/replace.js";
 
 import {
 	applyDiffPalette as applySharedDiffPalette,
@@ -1730,6 +1731,86 @@ Examples:
 		async execute(tid: string, params: any, sig: any, upd: any, ctx: any) {
 			const fp = params.path ?? params.file_path ?? "";
 			const operations = getEditOperations(params);
+
+			// Try cascading replace() first — smarter matching than SDK's exact-only edit
+			if (fp && operations.length > 0 && existsSync(fp)) {
+				try {
+					let content = readFileSync(fp, "utf-8");
+					let firstStrategy = "";
+					let replaceOk = true;
+
+					for (const op of operations) {
+						const r = replace(content, op.oldText, op.newText);
+						if (r.changed) {
+							content = r.content;
+							if (!firstStrategy) firstStrategy = r.strategy;
+						} else {
+							replaceOk = false;
+							break;
+						}
+					}
+
+					if (replaceOk) {
+						writeFileSync(fp, content, "utf-8");
+
+						const { diffs, summary } = summarizeEditOperations(operations);
+						const lg = detectDiffLanguage(fp);
+
+						if (operations.length === 1) {
+							let editLine = 0;
+							try {
+								const idx = content.indexOf(operations[0].newText);
+								if (idx >= 0) editLine = content.slice(0, idx).split("\n").length;
+							} catch {
+								editLine = 0;
+							}
+							const useFull = !!(params as any)._expandGaps;
+							const diffData = useFull
+								? parseDiff(operations[0].oldText, operations[0].newText, undefined)
+								: diffs[0];
+							return {
+								content: [{ type: "text" as const, text: `Edited ${sp(fp)}` }],
+								details: {
+									_type: "editInfo",
+									summary,
+									editLine,
+									diff: diffData,
+									language: lg,
+									oldContent: operations[0].oldText,
+									newContent: operations[0].newText,
+									_replaceStrategy: firstStrategy,
+								},
+							};
+						}
+
+						// Merge all diffs into one combined view for rendering
+						const merged: typeof diffs[0] = {
+							lines: diffs.flatMap((diff, i) => [
+								...(i > 0 ? [{ type: "sep" as const, oldNum: null, newNum: null, content: `───── Edit ${i + 1} ─────` }] : []),
+								...diff.lines,
+							]),
+							added: diffs.reduce((sum, diff) => sum + diff.added, 0),
+							removed: diffs.reduce((sum, diff) => sum + diff.removed, 0),
+							chars: diffs.reduce((sum, diff) => sum + diff.chars, 0),
+						};
+						return {
+							content: [{ type: "text" as const, text: `Edited ${sp(fp)}` }],
+							details: {
+								_type: "multiEditInfo",
+								summary,
+								editCount: operations.length,
+								diffLineCount: merged.lines.length,
+								diff: merged,
+								language: lg,
+							},
+						};
+					}
+				} catch (replaceError) {
+					// replace() failed; fall through to SDK edit tool
+					console.warn(`[pi-diff] replace() failed, falling back to SDK: ${replaceError instanceof Error ? replaceError.message : String(replaceError)}`);
+				}
+			}
+
 			const result = await origEdit.execute(tid, params, sig, upd, ctx);
 
 			if (operations.length === 0) return result;

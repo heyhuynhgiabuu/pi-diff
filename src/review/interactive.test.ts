@@ -44,7 +44,7 @@ describe("formatInteractiveReviewPanel", () => {
 
 		expect(panel).toContain("## File: src/a.ts");
 		expect(panel).toContain("### Hunk src/a.ts:1:1");
-		expect(panel).toContain("review_git_comment");
+		expect(panel).toContain("File: src/a.ts, hunk: src/a.ts:1:1, first changed line: 2");
 	});
 });
 

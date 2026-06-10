@@ -11,6 +11,13 @@ const mocks = vi.hoisted(() => ({
 	copyToClipboard: vi.fn(),
 }));
 
+vi.mock("./review/hunk-bridge.js", () => ({
+	checkHunkAvailable: async () => false,
+	launchHunkReview: async () => ({ available: false }),
+	extractComments: () => [],
+	parseHunkComments: () => [],
+}));
+
 vi.mock("@earendil-works/pi-coding-agent", () => ({
 	copyToClipboard: mocks.copyToClipboard,
 	createWriteTool: () => ({
