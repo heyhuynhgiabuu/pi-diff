@@ -21,14 +21,7 @@
     "type": "git",
     "url": "https://github.com/buddingnewinsights/pi-diff.git"
   },
-  "bin": {
-    "pi-diff-review": "./dist/cli.js"
-  },
   "files": [
-    "dist/cli.d.ts",
-    "dist/cli.d.ts.map",
-    "dist/cli.js",
-    "dist/cli.js.map",
     "dist/index.d.ts",
     "dist/index.d.ts.map",
     "dist/index.js",
@@ -53,22 +46,6 @@
     "dist/core/resolve-lines.d.ts.map",
     "dist/core/resolve-lines.js",
     "dist/core/resolve-lines.js.map",
-    "dist/review/command.d.ts",
-    "dist/review/command.d.ts.map",
-    "dist/review/command.js",
-    "dist/review/command.js.map",
-    "dist/review/hunk-bridge.d.ts",
-    "dist/review/hunk-bridge.d.ts.map",
-    "dist/review/hunk-bridge.js",
-    "dist/review/hunk-bridge.js.map",
-    "dist/review/export.d.ts",
-    "dist/review/export.d.ts.map",
-    "dist/review/export.js",
-    "dist/review/export.js.map",
-    "dist/review/file-preview.d.ts",
-    "dist/review/file-preview.d.ts.map",
-    "dist/review/file-preview.js",
-    "dist/review/file-preview.js.map",
     "dist/review/git.d.ts",
     "dist/review/git.d.ts.map",
     "dist/review/git.js",
@@ -77,34 +54,13 @@
     "dist/review/hunk-preview.d.ts.map",
     "dist/review/hunk-preview.js",
     "dist/review/hunk-preview.js.map",
-    "dist/review/interactive.d.ts",
-    "dist/review/interactive.d.ts.map",
-    "dist/review/interactive.js",
-    "dist/review/interactive.js.map",
-    "dist/review/model.d.ts",
-    "dist/review/model.d.ts.map",
-    "dist/review/model.js",
-    "dist/review/model.js.map",
-    "dist/review/prompt.d.ts",
-    "dist/review/prompt.d.ts.map",
-    "dist/review/prompt.js",
-    "dist/review/prompt.js.map",
-    "dist/review/session.d.ts",
-    "dist/review/session.d.ts.map",
-    "dist/review/session.js",
-    "dist/review/session.js.map",
-    "dist/review/tui.d.ts",
-    "dist/review/tui.d.ts.map",
-    "dist/review/tui.js",
-    "dist/review/tui.js.map",
     "media/",
-    "prompts/",
     "README.md",
     "LICENSE"
   ],
   "type": "module",
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src/",
     "lint:fix": "biome check --fix src/",
@@ -128,9 +84,6 @@
   "pi": {
     "extensions": [
       "./dist/index.js"
-    ],
-    "prompts": [
-      "./prompts"
     ]
   },
   "main": "./dist/index.js",
