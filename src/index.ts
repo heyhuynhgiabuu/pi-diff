@@ -40,7 +40,6 @@ import {
   sepLabelUnified,
 } from "./core/diff.js";
     import { replace } from "./core/replace.js";
-    import { registerReviewDiffCommand } from "./review/command.js";
 
 import {
   applyDiffPalette as applySharedDiffPalette,
@@ -1560,8 +1559,6 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
     };
     return text;
   }
-
-    registerReviewDiffCommand(pi, cwd);
 
       // =======================================================================
       // write
