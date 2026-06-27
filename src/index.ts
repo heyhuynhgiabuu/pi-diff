@@ -1831,6 +1831,14 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
               };
             }
 
+            // Compute the line of the first edit for the title summary
+            const firstEditLine = (() => {
+              if (!operations[0]?.newText) return 0;
+              const idx = content.indexOf(operations[0].newText);
+              if (idx < 0) return 0;
+              return content.slice(0, idx).split("\n").length;
+            })();
+
             // Merge all diffs into one combined view for rendering
             const merged: (typeof diffs)[0] = {
               lines: diffs.flatMap((diff, i) => [
@@ -1854,7 +1862,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
               content: [{ type: "text" as const, text: `Edited ${sp(fp)}` }],
               details: {
                 _type: "multiEditInfo",
-                summary,
+                summary: firstEditLine > 0 ? `${summary} at line ${firstEditLine}` : summary,
                 filePath: fp,
                 editCount: operations.length,
                 diffLineCount: merged.lines.length,
@@ -1894,7 +1902,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
           : diffs[0];
         (result as Record<string, unknown>).details = {
           _type: "editInfo",
-          summary,
+          summary: editLine > 0 ? `${summary} at line ${editLine}` : summary,
           filePath: fp,
           editLine,
           diff: diffData,
@@ -1925,9 +1933,19 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
         removed: diffs.reduce((sum, diff) => sum + diff.removed, 0),
         chars: diffs.reduce((sum, diff) => sum + diff.chars, 0),
       };
+      let firstEditLine = 0;
+      try {
+        if (fp) {
+          const f = readFileSync(fp, "utf8");
+          const idx = f.indexOf(operations[0].newText);
+          if (idx >= 0) firstEditLine = f.slice(0, idx).split("\n").length;
+        }
+      } catch {
+        firstEditLine = 0;
+      }
       (result as Record<string, unknown>).details = {
         _type: "multiEditInfo",
-        summary,
+        summary: firstEditLine > 0 ? `${summary} at line ${firstEditLine}` : summary,
         filePath: fp,
         editCount: operations.length,
         diffLineCount: merged.lines.length,
