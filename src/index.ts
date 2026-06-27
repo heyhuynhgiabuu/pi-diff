@@ -1963,13 +1963,28 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 
       if (ctx.argsComplete && operations.length > 0) {
         const { totalAdded, totalRemoved } = summarizeEditOperations(operations);
+        // Compute the line number for the call preview by reading the
+        // file and finding the first oldText. This lets the title show
+        // "at line N" even before the edit executes, matching what the
+        // result title will show.
+        let previewLine = 0;
+        try {
+          if (fp && existsSync(fp)) {
+            const cur = readFileSync(fp, "utf-8");
+            const idx = cur.indexOf(operations[0].oldText);
+            if (idx >= 0) previewLine = cur.slice(0, idx).split("\n").length;
+          }
+        } catch {
+          previewLine = 0;
+        }
+        const loc = previewLine > 0 ? ` ${theme.fg("muted", `at line ${previewLine}`)}` : "";
         text.setText(
           formatToolTitle(
             "edit",
             fp,
             theme,
             termW(),
-            `  ${theme.fg("muted", summarize(totalAdded, totalRemoved))}`,
+            `  ${theme.fg("muted", summarize(totalAdded, totalRemoved))}${loc}`,
           ),
         );
       } else {
