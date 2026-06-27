@@ -41,7 +41,7 @@ import {
 } from "./core/diff.js";
 import { replace } from "./core/replace.js";
 import { resolveLinesFromPatch } from "./core/resolve-lines.js";
-import { registerReviewDiffCommand } from "./review/command.js";
+import { registerReviewWindowCommand } from "./review-window/command.js";
 import { registerEditGuard } from "./edit-guard.js";
 
 import {
@@ -1563,7 +1563,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
     return text;
   }
 
-  registerReviewDiffCommand(pi, cwd);
+  registerReviewWindowCommand(pi);
 
   // ── resolve_lines tool ────────────────────────────────────────────────
 
