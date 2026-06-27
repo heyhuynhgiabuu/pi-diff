@@ -23,7 +23,7 @@
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { extname, relative } from "node:path";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { EditToolCallEvent, ExtensionHandler, ToolCallEventResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { codeToANSI } from "@shikijs/cli";
 import * as Diff from "diff";
@@ -42,6 +42,7 @@ import {
 import { replace } from "./core/replace.js";
 import { resolveLinesFromPatch } from "./core/resolve-lines.js";
 import { registerReviewDiffCommand } from "./review/command.js";
+import { registerEditGuard } from "./edit-guard.js";
 
 import {
   applyDiffPalette as applySharedDiffPalette,
@@ -2164,9 +2165,11 @@ Examples:
       }
       text.__piDiffTask = undefined;
       text.setText(
-        `  ${theme.fg("dim", String(result?.content?.[0]?.text ?? "edited").slice(0, 120))}`,
-      );
-      return text;
-    },
-  });
+	  `  ${theme.fg("dim", String(result?.content?.[0]?.text ?? "edited").slice(0, 120))}`,
+		);
+		return text;
+	},
+	});
+
+	registerEditGuard(pi);
 }
