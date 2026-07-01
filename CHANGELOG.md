@@ -4,6 +4,12 @@ All notable changes to `@heyhuynhgiabuu/pi-diff` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.6.8] — 2026-07-01
+
+### Fixed
+
+- **npm package**: include `dist/collapsed-hint.js` in published tarball (`package.json` `files`); fixes `Cannot find module './collapsed-hint.js'` at load time.
+
 ## [0.6.7] — 2026-07-01
 
 ### Removed
