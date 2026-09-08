@@ -1417,13 +1417,13 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 	const TOOL_RESULT_INDENT = " ";
 	const TOOL_HEADER_LEFT_PAD = 0;
 	const DIFF_BODY_LEFT_PAD = 0;
-	/** Built-in `edit` tool diff result frame; intentionally offset from read/write/apply_patch previews. */
+	/** Keep `edit` on the default host Box: no extra edge padding, one title/body separator. */
 	const EDIT_DIFF_RESULT_FRAME = {
-		headerLeftPad: 1,
-		bodyLeftPad: 1,
-		topPad: 1,
+		headerLeftPad: 0,
+		bodyLeftPad: 0,
+		topPad: 0,
 		bottomPad: 1,
-		previewBottomPad: 1,
+		previewBottomPad: 0,
 	} as const;
 	function resolvePreviewDiffColors(theme: any): DiffColors {
 		resolveDiffColors(theme);
@@ -1483,8 +1483,8 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 
 	function formatToolErrorResult(name: string, message: string, theme: any): string {
 		const meta = theme.fg("error", theme.bold(formatToolHeaderName(name)));
-		const header = formatToolFrameHeaderText({ meta, theme, headerLeftPad: 1, topPad: 0, bottomPad: 1 });
-		return `${header}\n ${theme.fg("error", message)}\n`;
+		const header = formatToolFrameHeaderText({ meta, theme, bottomPad: 1 });
+		return `${header}\n${theme.fg("error", message)}`;
 	}
 
 	function summarizeApplyPatchChanges(changes: Array<{ action: string; path: string }>, theme: any): string {
@@ -1496,8 +1496,6 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 	function renderApplyPatchPreview(text: any, result: any, theme: any, ctx: any): boolean {
 		const applied = Array.isArray(result?.applied) ? result.applied : [];
 		if (!applied.length) return false;
-
-		const w = termW();
 		const previewable = applied.filter((change: any) => {
 			if (typeof change?.path !== "string") return false;
 			if (change.action === "add") return typeof change.newContent === "string";
@@ -1513,7 +1511,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 				clearToolHeaderBg(text);
 				resolvePreviewDiffColors(theme);
 				const lineCount = change.newContent.split("\n").length;
-				const newHdr = bgLine(`${theme.fg("success", `✓ new file (${lineCount} lines)`)}`, w);
+				const newHdr = theme.fg("success", `✓ new file (${lineCount} lines)`);
 				const fp = change.path;
 				const pk = `ap:nf:${sharedThemeCacheKey(theme)}:${fp}:${lineCount}`;
 				if (ctx.state._nfk !== pk) {
@@ -1543,11 +1541,10 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 				setDiffPreviewTask(
 					text,
 					"ap",
-					(width: number) =>
-						formatToolFrameHeader({
+					() =>
+						formatToolFrameHeaderText({
 							meta: `${theme.fg("toolTitle", theme.bold(formatToolHeaderName("apply_patch")))}${TOOL_RESULT_INDENT}${theme.fg("muted", `(1 change)`)}${TOOL_RESULT_INDENT}${formatToolHeaderPath(theme, sp(change.path))}`,
 							theme,
-							width,
 							topPad: 0,
 							bottomPad: 1,
 						}),
@@ -1556,7 +1553,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 					MAX_PREVIEW_LINES,
 					theme,
 					ctx,
-					{ previewBottomPad: 1, compactGutter: true },
+					{ previewBottomPad: 0, compactGutter: true },
 				);
 
 				return true;
@@ -1587,11 +1584,10 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 		setDiffPreviewTask(
 			text,
 			"ap",
-			(width: number) =>
-				formatToolFrameHeader({
+			() =>
+				formatToolFrameHeaderText({
 					meta: `${theme.fg("toolTitle", theme.bold(formatToolHeaderName("apply_patch")))}${TOOL_RESULT_INDENT}${theme.fg("muted", `(${previewable.length} changes)`)} ${summarizeThemed(added, removed, theme)}${TOOL_RESULT_INDENT}${summarizeApplyPatchChanges(previewable, theme)}`,
 					theme,
-					width,
 					topPad: 0,
 					bottomPad: 1,
 				}),
@@ -1600,7 +1596,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			MAX_PREVIEW_LINES,
 			theme,
 			ctx,
-			{ previewBottomPad: 1, compactGutter: true },
+			{ previewBottomPad: 0, compactGutter: true },
 		);
 
 		return true;
@@ -1748,7 +1744,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			return bottom ? `${main}\n${bottom}` : main;
 		};
 		text.__piDiffTask = {
-			placeholder: joinHeaderBody(termW(), padDiffBody(theme.fg("muted", " rendering diff…"), frame?.bodyLeftPad)),
+			placeholder: joinHeaderBody(termW(), padDiffBody(theme.fg("muted", "rendering diff…"), frame?.bodyLeftPad)),
 			fallback: header(termW()),
 			invalidate: ctx.invalidate,
 			key: (width: number) => {
@@ -1824,6 +1820,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 	registerToolIfEnabled("write", {
 		...origWrite,
 		name: "write",
+		renderShell: "default",
 
 		async execute(tid: string, params: any, sig: any, upd: any, ctx: any) {
 			const fp = params.path ?? params.file_path ?? "";
@@ -1872,7 +1869,6 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			const label = isNew ? "create" : "write";
 			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
 			resolveDiffColors(theme);
-			const w = termW();
 			const stats = writeCallStatsSuffix(ctx.toolCallId, theme);
 
 			if (args?.content && !ctx.argsComplete) {
@@ -1884,7 +1880,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			}
 
 			if (args?.content && ctx.argsComplete && isNew) {
-				const title = formatToolFrameHeader({ label, filePath: fp, theme, width: w, topPad: 0, bottomPad: 1 });
+				const title = formatToolFrameHeaderText({ label, filePath: fp, theme, topPad: 0, bottomPad: 1 });
 				const previewKey = `create:${sharedThemeCacheKey(theme)}:${fp}:${String(args.content).length}`;
 				if (ctx.state._previewKey !== previewKey) {
 					ctx.state._previewKey = previewKey;
@@ -1926,7 +1922,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			if (d?._type === "diff") {
 				setDiffPreviewTask(text, "wd", "", d.diff, d.language, MAX_RENDER_LINES, theme, ctx, {
 					omitHeader: true,
-					previewBottomPad: 1,
+					previewBottomPad: 0,
 					compactGutter: true,
 				});
 				return text;
@@ -1934,15 +1930,14 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			if (d?._type === "noChange") {
 				text.__piDiffTask = undefined;
 				clearToolHeaderBg(text);
-				text.setText(`${TOOL_RESULT_INDENT}${theme.fg("muted", "✓ no changes")}`);
+				text.setText(theme.fg("muted", "✓ no changes"));
 				return text;
 			}
 			if (d?._type === "new") {
 				const { lines: lineCount, content: rawContent, filePath: fp } = d;
 				clearToolHeaderBg(text);
 				resolvePreviewDiffColors(theme);
-				const w = termW();
-				const newHdr = bgLine(`${theme.fg("success", `✓ new file (${lineCount} lines)`)}`, w);
+				const newHdr = theme.fg("success", `✓ new file (${lineCount} lines)`);
 				const pk = `nf:${sharedThemeCacheKey(theme)}:${fp}:${lineCount}`;
 				if (ctx.state._nfk !== pk) {
 					ctx.state._nfk = pk;
@@ -1958,8 +1953,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 							const maxShow = hlLines.length;
 							const preview = hlLines.slice(0, maxShow).join("\n").replace(/\n+$/, "");
 							const rem = hlLines.length - maxShow;
-							const moreLine =
-								rem > 0 ? `\n${bgLine(`${TOOL_RESULT_INDENT}${theme.fg("muted", `… ${rem} more lines`)}`, width)}` : "";
+							const moreLine = rem > 0 ? `\n${bgLine(theme.fg("muted", `… ${rem} more lines`), width)}` : "";
 							return `${newHdr}\n${padDiffBody(preview)}${moreLine}`;
 						},
 					};
@@ -1968,9 +1962,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			}
 
 			clearToolHeaderBg(text);
-			text.setText(
-				`${TOOL_RESULT_INDENT}${theme.fg("dim", String(result?.content?.[0]?.text ?? "written").slice(0, 120))}`,
-			);
+			text.setText(theme.fg("dim", String(result?.content?.[0]?.text ?? "written").slice(0, 120)));
 			return text;
 		},
 	});
@@ -2044,6 +2036,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 	registerToolIfEnabled("edit", {
 		...origEdit,
 		name: "edit",
+		renderShell: "default",
 		parameters: {
 			...((origEdit as any).parameters || {}),
 			properties: {
@@ -2100,38 +2093,22 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 
 		renderCall(args: any, theme: any, ctx: any) {
 			const fp = args?.path ?? args?.file_path ?? "";
-			const operations = getEditOperations(args);
 			const text = ctx.lastComponent ?? new TextComponent("", 0, 0);
 			resolvePreviewDiffColors(theme);
 
 			const stats = editCallStatsSuffix(ctx.toolCallId, theme);
-			if (ctx.argsComplete && operations.length > 0) {
-				setToolHeaderBg(text);
-				text.setText(
-					formatToolFrameHeaderText({
-						label: "edit",
-						filePath: fp,
-						theme,
-						suffix: stats,
-						topPad: EDIT_DIFF_RESULT_FRAME.topPad,
-						bottomPad: EDIT_DIFF_RESULT_FRAME.bottomPad,
-						headerLeftPad: EDIT_DIFF_RESULT_FRAME.headerLeftPad,
-					}),
-				);
-			} else {
-				text.setText(
-					formatToolFrameHeader({
-						label: "edit",
-						filePath: fp,
-						theme,
-						width: termW(),
-						suffix: stats,
-						topPad: EDIT_DIFF_RESULT_FRAME.topPad,
-						bottomPad: EDIT_DIFF_RESULT_FRAME.bottomPad,
-						headerLeftPad: EDIT_DIFF_RESULT_FRAME.headerLeftPad,
-					}),
-				);
-			}
+			setToolHeaderBg(text);
+			text.setText(
+				formatToolFrameHeaderText({
+					label: "edit",
+					filePath: fp,
+					theme,
+					suffix: stats,
+					topPad: EDIT_DIFF_RESULT_FRAME.topPad,
+					bottomPad: EDIT_DIFF_RESULT_FRAME.bottomPad,
+					headerLeftPad: EDIT_DIFF_RESULT_FRAME.headerLeftPad,
+				}),
+			);
 			return text;
 		},
 
@@ -2176,9 +2153,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			}
 			text.__piDiffTask = undefined;
 			clearToolHeaderBg(text);
-			text.setText(
-				`${TOOL_RESULT_INDENT}${theme.fg("dim", String(result?.content?.[0]?.text ?? "edited").slice(0, 120))}`,
-			);
+			text.setText(theme.fg("dim", String(result?.content?.[0]?.text ?? "edited").slice(0, 120)));
 
 			return text;
 		},
@@ -2187,6 +2162,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 	registerToolIfEnabled("apply_patch", {
 		name: "apply_patch",
 		label: "apply_patch",
+		renderShell: "default",
 		description:
 			"Multi-file patch engine. One call can add, update, delete, or move multiple files. Uses structured JSON changes array.",
 		parameters: {

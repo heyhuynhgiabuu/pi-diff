@@ -4,6 +4,20 @@ All notable changes to `@heyhuynhgiabuu/pi-diff` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.8.2] — 2026-09-09
+
+### Fixed
+
+- **Tool rendering spacing** — normalize `write`, `edit`, and `apply_patch` previews around Pi's default tool shell: one host-provided leading space, no redundant edge padding, one title/body separator, and one trailing shell pad.
+
+### Changed
+
+- **Pi SDK dependencies** — update direct Pi SDK dependencies to **0.85.0**.
+
+### Added
+
+- **Renderer regression coverage** — test tool titles, create previews, diff bodies, non-diff results, and errors through the default host shell.
+
 ## [0.8.1] — 2026-08-23
 
 ### Fixed
