@@ -53,6 +53,12 @@ pi-diff wraps the built-in `write` and `edit` tools from the pi SDK, including s
 
 For `edit` calls, Pi's SDK performs matching, uniqueness and overlap validation, mutation queueing, and the file write. pi-diff adapts the SDK's returned unified patch into its syntax-highlighted renderer, so the preview reflects the actual matched source rather than the requested text.
 
+### `apply_patch` safety contract
+
+`apply_patch` remains a separate structured JSON tool for multi-file add, update, delete, and move operations. Paths are resolved relative to Pi's current workspace and must remain inside it; ancestor symlinks are rejected. Updates may use one `oldText`/`newText` replacement or an `edits` array of disjoint replacements matched against the original file.
+
+All changes are prepared before the first commit. A commit failure triggers reverse-order rollback, but filesystem rollback is necessarily best effort; callers should treat a failed result as requiring verification. Existing files are never intentionally clobbered by `add` or `move`, and invalid UTF-8 files are rejected rather than rewritten as text.
+
 The rendering pipeline:
 
 ```

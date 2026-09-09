@@ -28,7 +28,13 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import { codeToANSI } from "@shikijs/cli";
 import * as Diff from "diff";
-import { type ApplyPatchChange, executeApplyPatch, formatApplyPatchResult } from "./core/apply-patch.js";
+import {
+	type ApplyPatchChange,
+	type ApplyPatchResult,
+	executeApplyPatch,
+	formatApplyPatchResult,
+	parseApplyPatchInput,
+} from "./core/apply-patch.js";
 import { configIndicatorStyle, loadPiDiffConfig, type PiDiffToolName } from "./core/config.js";
 import {
 	computeHunkBlocks,
@@ -1502,7 +1508,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			if (change.action === "update" || change.action === "delete") return typeof change.oldContent === "string";
 			return false;
 		});
-		if (previewable.length !== applied.length) return false;
+		if (!previewable.length) return false;
 
 		if (previewable.length === 1) {
 			const change = previewable[0] as any;
@@ -2167,41 +2173,112 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			"Multi-file patch engine. One call can add, update, delete, or move multiple files. Uses structured JSON changes array.",
 		parameters: {
 			type: "object",
+			additionalProperties: false,
 			properties: {
 				changes: {
 					type: "array",
-					description: "Array of file changes to apply atomically.",
+					minItems: 1,
+					description:
+						"Changes are fully prepared before commit; filesystem rollback after a commit failure is best effort.",
 					items: {
-						type: "object",
-						properties: {
-							path: { type: "string", description: "Absolute path to the file." },
-							action: {
-								type: "string",
-								enum: ["add", "update", "delete", "move"],
-								description: "The operation to perform.",
+						oneOf: [
+							{
+								type: "object",
+								additionalProperties: false,
+								properties: {
+									path: { type: "string", minLength: 1, description: "Path within the current workspace." },
+									action: { type: "string", enum: ["add"] },
+									content: { type: "string", description: "Content for the new file." },
+								},
+								required: ["path", "action", "content"],
 							},
-							content: { type: "string", description: "Content for new files (action=add)." },
-							oldText: { type: "string", description: "Text to find for updates (action=update)." },
-							newText: { type: "string", description: "Replacement text for updates (action=update)." },
-							movePath: { type: "string", description: "Destination path for moves (action=move)." },
-						},
-						required: ["path", "action"],
+							{
+								type: "object",
+								additionalProperties: false,
+								properties: {
+									path: { type: "string", minLength: 1, description: "Path within the current workspace." },
+									action: { type: "string", enum: ["update"] },
+									oldText: { type: "string", minLength: 1, description: "Unique text to find." },
+									newText: { type: "string", description: "Replacement text; omitted means empty text." },
+								},
+								required: ["path", "action", "oldText"],
+							},
+							{
+								type: "object",
+								additionalProperties: false,
+								properties: {
+									path: { type: "string", minLength: 1, description: "Path within the current workspace." },
+									action: { type: "string", enum: ["update"] },
+									edits: {
+										type: "array",
+										minItems: 1,
+										items: {
+											type: "object",
+											additionalProperties: false,
+											properties: {
+												oldText: { type: "string", minLength: 1 },
+												newText: { type: "string" },
+											},
+											required: ["oldText", "newText"],
+										},
+									},
+								},
+								required: ["path", "action", "edits"],
+							},
+							{
+								type: "object",
+								additionalProperties: false,
+								properties: {
+									path: { type: "string", minLength: 1, description: "Path within the current workspace." },
+									action: { type: "string", enum: ["delete"] },
+								},
+								required: ["path", "action"],
+							},
+							{
+								type: "object",
+								additionalProperties: false,
+								properties: {
+									path: { type: "string", minLength: 1, description: "Source path within the current workspace." },
+									action: { type: "string", enum: ["move"] },
+									movePath: {
+										type: "string",
+										minLength: 1,
+										description: "Destination path within the current workspace.",
+									},
+								},
+								required: ["path", "action", "movePath"],
+							},
+						],
 					},
 				},
 			},
 			required: ["changes"],
 		},
-		async execute(_tid: string, params: any): Promise<any> {
-			const changes: ApplyPatchChange[] = (params.changes ?? []).map((c: any) => ({
-				path: c.path,
-				action: c.action,
-				content: c.content,
-				oldText: c.oldText,
-				newText: c.newText,
-				movePath: c.movePath,
-			}));
-
-			const result = await executeApplyPatch(changes);
+		async execute(
+			_tid: string,
+			params: unknown,
+			_signal?: AbortSignal,
+			_onUpdate?: unknown,
+			ctx?: { cwd?: string },
+		): Promise<any> {
+			let result: ApplyPatchResult;
+			try {
+				const changes: ApplyPatchChange[] = parseApplyPatchInput(params);
+				const toolCwd = typeof ctx?.cwd === "string" ? ctx.cwd : cwd;
+				result = await executeApplyPatch(changes, { cwd: toolCwd, root: toolCwd });
+			} catch (error) {
+				result = {
+					ok: false,
+					applied: [],
+					errors: [
+						{
+							path: "",
+							action: "input",
+							error: error instanceof Error ? error.message : String(error),
+						},
+					],
+				};
+			}
 			const output = formatApplyPatchResult(result);
 
 			return {

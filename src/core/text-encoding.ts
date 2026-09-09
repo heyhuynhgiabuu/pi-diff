@@ -1,26 +1,32 @@
 /**
- * BOM and line-ending preservation for hashline file I/O (aligned with pi-mono edit tool).
+ * BOM and line-ending preservation helpers for text-file mutations.
  */
 
-export type LineEnding = "\r\n" | "\n";
+export type LineEnding = "\r\n" | "\n" | "\r";
 
 export function stripBom(content: string): { bom: string; text: string } {
 	return content.startsWith("\uFEFF") ? { bom: "\uFEFF", text: content.slice(1) } : { bom: "", text: content };
 }
 
 export function detectLineEnding(content: string): LineEnding {
-	const crlfIdx = content.indexOf("\r\n");
 	const lfIdx = content.indexOf("\n");
-	if (lfIdx === -1 || crlfIdx === -1) return "\n";
-	return crlfIdx < lfIdx ? "\r\n" : "\n";
+	if (lfIdx === -1) return content.includes("\r") ? "\r" : "\n";
+	return content[lfIdx - 1] === "\r" ? "\r\n" : "\n";
 }
 
 export function normalizeToLF(text: string): string {
 	return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+/** Normalize line separators without rewriting lone CR characters in text. */
+export function normalizeForLineEnding(text: string, ending: LineEnding): string {
+	return ending === "\r" ? text.replace(/\r/g, "\n") : text.replace(/\r\n/g, "\n");
+}
+
 export function restoreLineEndings(text: string, ending: LineEnding): string {
-	return ending === "\r\n" ? text.replace(/\n/g, "\r\n") : text;
+	if (ending === "\r\n") return text.replace(/\n/g, "\r\n");
+	if (ending === "\r") return text.replace(/\n/g, "\r");
+	return text;
 }
 
 /** Strip BOM and normalize newlines for hashline matching; keep metadata for write-back. */

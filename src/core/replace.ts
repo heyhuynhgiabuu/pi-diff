@@ -547,18 +547,36 @@ export function replace(
 	return { content, changed: false, strategy: "none", count: 0 };
 }
 
+/** A single safe replacement located in the original content. */
+export interface PatchReplacement {
+	start: number;
+	end: number;
+	replacement: string;
+	strategy: "simple" | "indent-adjusted";
+}
+
+function countOverlappingOccurrences(content: string, substring: string): number {
+	if (substring.length === 0) return 0;
+	let count = 0;
+	let position = 0;
+	while (true) {
+		const index = content.indexOf(substring, position);
+		if (index === -1) return count;
+		count++;
+		position = index + 1;
+	}
+}
+
 /**
  * Conservative matcher for source mutations: exact text first, then one
  * unambiguous block whose only difference is a uniform indentation shift.
  * Unlike `replace`, it never guesses from similar content or normalizes
  * whitespace inside source tokens.
  */
-export function replaceForPatch(content: string, oldText: string, newText: string): ReplaceResult {
-	if (oldText.length === 0 || oldText === newText) {
-		return { content, changed: false, strategy: "none", count: 0 };
-	}
+export function findPatchReplacement(content: string, oldText: string, newText: string): PatchReplacement | undefined {
+	if (oldText.length === 0 || oldText === newText) return undefined;
 
-	const exactCount = countOccurrences(content, oldText);
+	const exactCount = countOverlappingOccurrences(content, oldText);
 	if (exactCount === 1) {
 		const index = content.indexOf(oldText);
 		const lineStart = content.lastIndexOf("\n", index - 1) + 1;
@@ -569,20 +587,15 @@ export function replaceForPatch(content: string, oldText: string, newText: strin
 			((oldText.includes("\n") || newText.includes("\n")) && index !== lineStart) ||
 			(index !== lineStart && omittedIndent.trim() === "" && oldIndent.length > 0 && oldIndent !== newIndent)
 		) {
-			return { content, changed: false, strategy: "none", count: 0 };
+			return undefined;
 		}
-		return {
-			content: content.slice(0, index) + newText + content.slice(index + oldText.length),
-			changed: true,
-			strategy: "simple",
-			count: 1,
-		};
+		return { start: index, end: index + oldText.length, replacement: newText, strategy: "simple" };
 	}
-	if (exactCount > 1) return { content, changed: false, strategy: "none", count: 0 };
+	if (exactCount > 1) return undefined;
 
 	const oldLines = oldText.split("\n");
 	if (oldLines.length > 1 && oldLines.at(-1) === "") oldLines.pop();
-	if (oldLines.length === 0) return { content, changed: false, strategy: "none", count: 0 };
+	if (oldLines.length === 0) return undefined;
 
 	const contentLines = content.split("\n");
 	const candidates: Array<{ start: number; text: string; indent: IndentAdjustment }> = [];
@@ -596,12 +609,13 @@ export function replaceForPatch(content: string, oldText: string, newText: strin
 
 		const indent = getIndentAdjustment(oldLines, actualLines);
 		const includesTrailingNewline = oldText.endsWith("\n") && i + oldLines.length < contentLines.length;
-		if (indent)
+		if (indent) {
 			candidates.push({ start, text: `${actualLines.join("\n")}${includesTrailingNewline ? "\n" : ""}`, indent });
+		}
 		start += contentLines[i].length + 1;
 	}
 
-	if (candidates.length !== 1) return { content, changed: false, strategy: "none", count: 0 };
+	if (candidates.length !== 1) return undefined;
 
 	const candidate = candidates[0];
 	const adjustedNewText = applyIndentAdjustment(
@@ -609,14 +623,25 @@ export function replaceForPatch(content: string, oldText: string, newText: strin
 		candidate.indent,
 		candidate.text.includes("\r\n") || candidate.text.endsWith("\r") ? "\r\n" : "\n",
 	);
-	if (adjustedNewText === undefined) return { content, changed: false, strategy: "none", count: 0 };
+	if (adjustedNewText === undefined) return undefined;
 	const replacement =
 		candidate.text.endsWith("\r") && !adjustedNewText.endsWith("\r") ? `${adjustedNewText}\r` : adjustedNewText;
 
 	return {
-		content: content.slice(0, candidate.start) + replacement + content.slice(candidate.start + candidate.text.length),
-		changed: true,
+		start: candidate.start,
+		end: candidate.start + candidate.text.length,
+		replacement,
 		strategy: "indent-adjusted",
+	};
+}
+
+export function replaceForPatch(content: string, oldText: string, newText: string): ReplaceResult {
+	const match = findPatchReplacement(content, oldText, newText);
+	if (!match) return { content, changed: false, strategy: "none", count: 0 };
+	return {
+		content: content.slice(0, match.start) + match.replacement + content.slice(match.end),
+		changed: true,
+		strategy: match.strategy,
 		count: 1,
 	};
 }

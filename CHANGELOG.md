@@ -4,6 +4,24 @@ All notable changes to `@heyhuynhgiabuu/pi-diff` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-09-09
+
+### Added
+
+- **Structured multi-edit updates** — apply multiple disjoint replacements against one original file with overlap rejection.
+- **Adversarial apply_patch coverage** — add regression tests for workspace boundaries, symlinks, encoding, line endings, modes, concurrency, moves, deletes, and previews.
+
+### Changed
+
+- **Workspace-safe paths** — resolve paths within Pi's current workspace and reject traversal outside it or through ancestor symlinks.
+- **Transactional mutations** — prepare every change before committing, serialize overlapping operations, preserve file bytes/BOM/EOL/mode metadata, and report best-effort rollback failures.
+- **Strict structured input** — validate action-specific fields at both the tool schema and runtime boundary.
+- **Accurate patch feedback** — generate structured diffs and render previewable changes from mixed add/update/delete batches.
+
+### Fixed
+
+- **Unsafe source updates** — reject ambiguous or overlapping matches, invalid UTF-8 files, and add/move collisions instead of silently rewriting or clobbering files.
+
 ## [0.8.2] — 2026-09-09
 
 ### Fixed
