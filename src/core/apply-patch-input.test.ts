@@ -48,4 +48,22 @@ describe("parseApplyPatchInput", () => {
 			parseApplyPatchInput({ changes: [{ path: "a", action: "update", oldText: "old", newText: 42 }] }),
 		).toThrow(/newText.*string/);
 	});
+
+	it("tolerates JSON-string and single-object model shapes", () => {
+		expect(parseApplyPatchInput(JSON.stringify({ changes: [{ path: "a", action: "delete" }] }))).toEqual([
+			{ path: "a", action: "delete" },
+		]);
+		expect(parseApplyPatchInput({ path: "a", action: "delete" })).toEqual([{ path: "a", action: "delete" }]);
+		expect(
+			parseApplyPatchInput({
+				changes: [
+					{ path: "a", action: "update", edits: JSON.stringify([{ oldText: "x", newText: "y" }]) },
+					{ path: "b", action: "update", edits: { oldText: "p", newText: "q" } },
+				],
+			}),
+		).toEqual([
+			{ path: "a", action: "update", edits: [{ oldText: "x", newText: "y" }] },
+			{ path: "b", action: "update", edits: [{ oldText: "p", newText: "q" }] },
+		]);
+	});
 });

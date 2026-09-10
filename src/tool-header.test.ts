@@ -110,7 +110,7 @@ describe("write/edit/apply_patch shell spacing", () => {
 		const lines = renderDefaultToolShell(call);
 		const title = lineContaining(lines, "← create");
 		assert.equal(title.index, 2);
-		assert.equal(lines.length, 5);
+		assert.equal(lines.length, 4);
 	});
 
 	it("keeps one leading space on diff bodies and one trailing shell pad", async () => {
@@ -140,6 +140,11 @@ describe("write/edit/apply_patch shell spacing", () => {
 			const lines = renderDefaultToolShell(call, result);
 			const body = lineContaining(lines, "rendering diff");
 			assert.equal(leadingSpaces(body.line), 1, `${name} diff body should have one leading space`);
+			assert.equal(
+				body.index,
+				lineContaining(lines, `← ${name}`).index + 1,
+				`${name} diff should sit directly under the title`,
+			);
 			let trailingBlankLines = 0;
 			for (let index = lines.length - 1; index >= 0 && lines[index].trim() === ""; index--) trailingBlankLines++;
 			assert.equal(trailingBlankLines, 1, `${name} diff should have one trailing shell pad`);

@@ -1423,12 +1423,12 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 	const TOOL_RESULT_INDENT = " ";
 	const TOOL_HEADER_LEFT_PAD = 0;
 	const DIFF_BODY_LEFT_PAD = 0;
-	/** Keep `edit` on the default host Box: no extra edge padding, one title/body separator. */
+	/** Keep `edit` on the default host Box: no extra edge padding, no title/body gap. */
 	const EDIT_DIFF_RESULT_FRAME = {
 		headerLeftPad: 0,
 		bodyLeftPad: 0,
 		topPad: 0,
-		bottomPad: 1,
+		bottomPad: 0,
 		previewBottomPad: 0,
 	} as const;
 	function resolvePreviewDiffColors(theme: any): DiffColors {
@@ -1489,7 +1489,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 
 	function formatToolErrorResult(name: string, message: string, theme: any): string {
 		const meta = theme.fg("error", theme.bold(formatToolHeaderName(name)));
-		const header = formatToolFrameHeaderText({ meta, theme, bottomPad: 1 });
+		const header = formatToolFrameHeaderText({ meta, theme, bottomPad: 0 });
 		return `${header}\n${theme.fg("error", message)}`;
 	}
 
@@ -1552,7 +1552,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 							meta: `${theme.fg("toolTitle", theme.bold(formatToolHeaderName("apply_patch")))}${TOOL_RESULT_INDENT}${theme.fg("muted", `(1 change)`)}${TOOL_RESULT_INDENT}${formatToolHeaderPath(theme, sp(change.path))}`,
 							theme,
 							topPad: 0,
-							bottomPad: 1,
+							bottomPad: 0,
 						}),
 					parsed,
 					detectDiffLanguage(change.path),
@@ -1595,7 +1595,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 					meta: `${theme.fg("toolTitle", theme.bold(formatToolHeaderName("apply_patch")))}${TOOL_RESULT_INDENT}${theme.fg("muted", `(${previewable.length} changes)`)} ${summarizeThemed(added, removed, theme)}${TOOL_RESULT_INDENT}${summarizeApplyPatchChanges(previewable, theme)}`,
 					theme,
 					topPad: 0,
-					bottomPad: 1,
+					bottomPad: 0,
 				}),
 			{ lines, added, removed, chars },
 			mixedLanguage ? undefined : language,
@@ -1881,12 +1881,12 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 				const n = String(args.content).split("\n").length;
 				const suffix = `${TOOL_RESULT_INDENT}${theme.fg("muted", `(${n} lines…)`)}${stats ? ` ${stats.trimStart()}` : ""}`;
 				setToolHeaderBg(text);
-				text.setText(formatToolFrameHeaderText({ label, filePath: fp, theme, suffix, topPad: 0, bottomPad: 1 }));
+				text.setText(formatToolFrameHeaderText({ label, filePath: fp, theme, suffix, topPad: 0, bottomPad: 0 }));
 				return text;
 			}
 
 			if (args?.content && ctx.argsComplete && isNew) {
-				const title = formatToolFrameHeaderText({ label, filePath: fp, theme, topPad: 0, bottomPad: 1 });
+				const title = formatToolFrameHeaderText({ label, filePath: fp, theme, topPad: 0, bottomPad: 0 });
 				const previewKey = `create:${sharedThemeCacheKey(theme)}:${fp}:${String(args.content).length}`;
 				if (ctx.state._previewKey !== previewKey) {
 					ctx.state._previewKey = previewKey;
@@ -1906,7 +1906,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 			}
 
 			setToolHeaderBg(text);
-			text.setText(formatToolFrameHeaderText({ label, filePath: fp, theme, suffix: stats, topPad: 0, bottomPad: 1 }));
+			text.setText(formatToolFrameHeaderText({ label, filePath: fp, theme, suffix: stats, topPad: 0, bottomPad: 0 }));
 			return text;
 		},
 
@@ -2289,6 +2289,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 		},
 		renderCall(args: any, theme: any, ctx: any) {
 			const text = getWidthAwareText(ctx.lastComponent);
+			resolveDiffColors(theme);
 			const changes = Array.isArray(args?.changes) ? args.changes : [];
 			const count = changes.length;
 			if (ctx.argsComplete && count > 0) {
@@ -2304,7 +2305,7 @@ export default async function diffRendererExtension(pi: ExtensionAPI): Promise<v
 				formatToolFrameHeaderText({
 					meta: `${theme.fg("toolTitle", theme.bold(formatToolHeaderName("apply_patch")))}${suffix}`,
 					topPad: 0,
-					bottomPad: 1,
+					bottomPad: 0,
 				}),
 			);
 			return text;

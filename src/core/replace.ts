@@ -133,7 +133,6 @@ const EscapeNormalizedReplacer: Replacer = function* (content, find) {
 		const block = contentLines.slice(i, i + findLines.length).join("\n");
 		if (block === unescaped || block.trim() === unescaped.trim()) {
 			yield block;
-			return;
 		}
 	}
 };
@@ -547,20 +546,24 @@ export function replace(
 	return { content, changed: false, strategy: "none", count: 0 };
 }
 
+/** Matching strategies used by the conservative patch matcher. */
+export type PatchStrategy = "simple" | "indent-adjusted" | "escape-normalized" | "unicode-normalized";
+
 /** A single safe replacement located in the original content. */
 export interface PatchReplacement {
 	start: number;
 	end: number;
 	replacement: string;
-	strategy: "simple" | "indent-adjusted";
+	strategy: PatchStrategy;
 }
 
-function countOverlappingOccurrences(content: string, substring: string): number {
-	if (substring.length === 0) return 0;
+/** Count exact occurrences of `oldText` (overlaps included). */
+export function countPatchOccurrences(content: string, oldText: string): number {
+	if (oldText.length === 0) return 0;
 	let count = 0;
 	let position = 0;
 	while (true) {
-		const index = content.indexOf(substring, position);
+		const index = content.indexOf(oldText, position);
 		if (index === -1) return count;
 		count++;
 		position = index + 1;
@@ -576,7 +579,7 @@ function countOverlappingOccurrences(content: string, substring: string): number
 export function findPatchReplacement(content: string, oldText: string, newText: string): PatchReplacement | undefined {
 	if (oldText.length === 0 || oldText === newText) return undefined;
 
-	const exactCount = countOverlappingOccurrences(content, oldText);
+	const exactCount = countPatchOccurrences(content, oldText);
 	if (exactCount === 1) {
 		const index = content.indexOf(oldText);
 		const lineStart = content.lastIndexOf("\n", index - 1) + 1;
@@ -615,24 +618,98 @@ export function findPatchReplacement(content: string, oldText: string, newText: 
 		start += contentLines[i].length + 1;
 	}
 
-	if (candidates.length !== 1) return undefined;
+	if (candidates.length === 1) {
+		const candidate = candidates[0];
+		const adjustedNewText = applyIndentAdjustment(
+			newText,
+			candidate.indent,
+			candidate.text.includes("\r\n") || candidate.text.endsWith("\r") ? "\r\n" : "\n",
+		);
+		if (adjustedNewText !== undefined) {
+			const replacement =
+				candidate.text.endsWith("\r") && !adjustedNewText.endsWith("\r") ? `${adjustedNewText}\r` : adjustedNewText;
+			return {
+				start: candidate.start,
+				end: candidate.start + candidate.text.length,
+				replacement,
+				strategy: "indent-adjusted",
+			};
+		}
+	}
 
-	const candidate = candidates[0];
-	const adjustedNewText = applyIndentAdjustment(
-		newText,
-		candidate.indent,
-		candidate.text.includes("\r\n") || candidate.text.endsWith("\r") ? "\r\n" : "\n",
-	);
-	if (adjustedNewText === undefined) return undefined;
-	const replacement =
-		candidate.text.endsWith("\r") && !adjustedNewText.endsWith("\r") ? `${adjustedNewText}\r` : adjustedNewText;
+	return findUniqueFuzzyReplacement(content, oldText, newText);
+}
 
-	return {
-		start: candidate.start,
-		end: candidate.start + candidate.text.length,
-		replacement,
-		strategy: "indent-adjusted",
-	};
+/**
+ * Normalize drift that does not change source meaning: trailing whitespace
+ * and Unicode quotes/dashes/spaces. Leading indentation is preserved.
+ */
+function normalizeForPatchMatch(text: string): string {
+	return text
+		.normalize("NFKC")
+		.split("\n")
+		.map((line) => line.replace(/[ \t]+$/, ""))
+		.join("\n")
+		.replace(/[\u2018\u2019\u201A\u201B]/g, "'")
+		.replace(/[\u201C\u201D\u201E\u201F]/g, '"')
+		.replace(/[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]/g, "-")
+		.replace(/[\u00A0\u2002-\u200A\u202F\u205F\u3000]/g, " ");
+}
+
+/** Matches blocks that differ only by trailing whitespace or Unicode punctuation/spacing drift. */
+const UnicodeNormalizedReplacer: Replacer = function* (content, find) {
+	const findLines = find.split("\n");
+	if (findLines.length > 1 && findLines[findLines.length - 1] === "") findLines.pop();
+	if (findLines.length === 0) return;
+
+	const normalizedFindLines = findLines.map(normalizeForPatchMatch);
+	const contentLines = content.split("\n");
+	if (findLines.length > contentLines.length) return;
+
+	for (let i = 0; i <= contentLines.length - findLines.length; i++) {
+		const block = contentLines.slice(i, i + findLines.length);
+		if (block.every((line, j) => normalizeForPatchMatch(line) === normalizedFindLines[j])) {
+			yield block.join("\n");
+		}
+	}
+};
+
+/** Source-safe fallbacks: tolerate escapes and Unicode/trailing-whitespace drift only. */
+const PATCH_FALLBACK_STRATEGIES: ReadonlyArray<{ name: PatchStrategy; replacer: Replacer }> = [
+	{ name: "escape-normalized", replacer: EscapeNormalizedReplacer },
+	{ name: "unicode-normalized", replacer: UnicodeNormalizedReplacer },
+];
+
+/** Locate one fuzzy match, requiring exactly one candidate that occurs exactly once. */
+function findUniqueFuzzyReplacement(content: string, oldText: string, newText: string): PatchReplacement | undefined {
+	for (const { name, replacer } of PATCH_FALLBACK_STRATEGIES) {
+		const candidates = [...replacer(content, oldText)];
+		if (candidates.length !== 1) continue;
+		const candidate = candidates[0];
+		if (countPatchOccurrences(content, candidate) !== 1) continue;
+		const start = content.indexOf(candidate);
+		if (start === -1) continue;
+		let end = start + candidate.length;
+		// Line-based strategies drop the trailing newline; restore it so newText does not double it.
+		if (oldText.endsWith("\n") && !candidate.endsWith("\n") && content[end] === "\n") end += 1;
+		const replacement = adjustReplacementIndent(oldText, content.slice(start, end), newText);
+		if (replacement === undefined) continue;
+		return { start, end, replacement, strategy: name };
+	}
+	return undefined;
+}
+
+/** Align newText to a uniform indentation shift; undefined when the shift is non-uniform. */
+function adjustReplacementIndent(oldText: string, candidate: string, newText: string): string | undefined {
+	const expected = oldText.split("\n");
+	if (expected.length > 1 && expected.at(-1) === "") expected.pop();
+	const actual = candidate.split("\n");
+	if (actual.length > 1 && actual.at(-1) === "") actual.pop();
+	if (expected.length !== actual.length) return newText;
+	const adjustment = getIndentAdjustment(expected, actual);
+	if (!adjustment) return undefined;
+	if (adjustment.kind === "none") return newText;
+	return applyIndentAdjustment(newText, adjustment, candidate.includes("\r\n") ? "\r\n" : "\n");
 }
 
 export function replaceForPatch(content: string, oldText: string, newText: string): ReplaceResult {

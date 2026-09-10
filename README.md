@@ -55,7 +55,7 @@ For `edit` calls, Pi's SDK performs matching, uniqueness and overlap validation,
 
 ### `apply_patch` safety contract
 
-`apply_patch` remains a separate structured JSON tool for multi-file add, update, delete, and move operations. Paths are resolved relative to Pi's current workspace and must remain inside it; ancestor symlinks are rejected. Updates may use one `oldText`/`newText` replacement or an `edits` array of disjoint replacements matched against the original file.
+`apply_patch` remains a separate structured JSON tool for multi-file add, update, delete, and move operations. Paths are resolved relative to Pi's current workspace and must remain inside it; ancestor symlinks are rejected. Updates may use one `oldText`/`newText` replacement or an `edits` array of disjoint replacements matched against the original file. Matching is exact first, then tolerates escaped sequences and Unicode/trailing-whitespace drift; a match is accepted only when it is unique, and ambiguous or missing `oldText` fails with a specific error.
 
 All changes are prepared before the first commit. A commit failure triggers reverse-order rollback, but filesystem rollback is necessarily best effort; callers should treat a failed result as requiring verification. Existing files are never intentionally clobbered by `add` or `move`, and invalid UTF-8 files are rejected rather than rewritten as text.
 

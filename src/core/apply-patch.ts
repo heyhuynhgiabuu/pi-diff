@@ -10,7 +10,7 @@ import { isUtf8 } from "node:buffer";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { structuredPatch } from "diff";
-import { findPatchReplacement } from "./replace.js";
+import { countPatchOccurrences, findPatchReplacement } from "./replace.js";
 import { detectLineEnding, normalizeForLineEnding, restoreLineEndings, stripBom } from "./text-encoding.js";
 
 // ---------------------------------------------------------------------------
@@ -103,8 +103,45 @@ function parseUpdateEdits(value: unknown, context: string): ApplyPatchEdit[] {
 	});
 }
 
+function tryParseJson(value: unknown): unknown {
+	if (typeof value !== "string") return value;
+	const trimmed = value.trim();
+	if (trimmed === "") return value;
+	try {
+		return JSON.parse(trimmed);
+	} catch {
+		return value;
+	}
+}
+
+/** Tolerate common model serialization shapes before strict validation. */
+function normalizeApplyPatchInput(input: unknown): unknown {
+	const parsed = tryParseJson(input);
+	if (!isRecord(parsed)) return parsed;
+
+	const record: Record<string, unknown> =
+		!("changes" in parsed) && typeof parsed.path === "string" && typeof parsed.action === "string"
+			? { changes: [parsed] }
+			: parsed;
+
+	const changes = tryParseJson(record.changes);
+	if (!Array.isArray(changes)) return record;
+
+	return {
+		...record,
+		changes: changes.map((entry) => {
+			if (!isRecord(entry)) return entry;
+			const edits = tryParseJson(entry.edits);
+			if (Array.isArray(edits)) return { ...entry, edits };
+			if (isRecord(edits) && typeof edits.oldText === "string") return { ...entry, edits: [edits] };
+			return entry;
+		}),
+	};
+}
+
 /** Decode the model-facing tool payload before it reaches the mutation core. */
-export function parseApplyPatchInput(input: unknown): ApplyPatchChange[] {
+export function parseApplyPatchInput(rawInput: unknown): ApplyPatchChange[] {
+	const input = normalizeApplyPatchInput(rawInput);
 	if (!isRecord(input)) throw new Error("apply_patch input must be an object");
 	rejectUnknownKeys(input, ["changes"], "apply_patch");
 	if (!Array.isArray(input.changes) || input.changes.length === 0) {
@@ -447,6 +484,15 @@ function getUpdateEdits(change: ApplyPatchChange): ApplyPatchEdit[] {
 	return [{ oldText: change.oldText, newText: change.newText ?? "" }];
 }
 
+/** Explain a failed match so the model can self-correct. */
+function patchFailureMessage(content: string, oldText: string, filePath: string): string {
+	const occurrences = countPatchOccurrences(content, oldText);
+	if (occurrences > 1) {
+		return `oldText matches ${occurrences} times in ${filePath}; add surrounding context to make it unique`;
+	}
+	return `oldText not found in ${filePath}`;
+}
+
 function applyUpdateEdits(content: string, edits: ApplyPatchEdit[], filePath: string): string {
 	const replacements = edits.map((edit, index) => {
 		if (!edit || typeof edit.oldText !== "string" || typeof edit.newText !== "string") {
@@ -455,7 +501,7 @@ function applyUpdateEdits(content: string, edits: ApplyPatchEdit[], filePath: st
 		if (edit.oldText.length === 0) throw new Error(`edit ${index + 1} in ${filePath} requires oldText`);
 		if (edit.oldText === edit.newText) throw new Error("oldText and newText are identical — no change");
 		const match = findPatchReplacement(content, edit.oldText, edit.newText);
-		if (!match) throw new Error(`oldText not found in ${filePath}`);
+		if (!match) throw new Error(patchFailureMessage(content, edit.oldText, filePath));
 		return match;
 	});
 

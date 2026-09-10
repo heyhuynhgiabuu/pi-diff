@@ -1,23 +1,21 @@
-# @heyhuynhgiabuu/pi-diff v0.9.0
+# @heyhuynhgiabuu/pi-diff v0.9.1
 
 ## Added
 
-- Structured multi-edit `apply_patch` updates with overlap rejection.
-- Adversarial coverage for workspace boundaries, symlinks, encoding, line endings, modes, concurrency, moves, deletes, and previews.
+- Tolerant `apply_patch` input: JSON-string payloads, a single change object, and `edits` sent as a JSON string or a single object.
 
 ## Changed
 
-- Confine `apply_patch` paths to Pi's current workspace and reject ancestor symlink traversal.
-- Prepare all changes before committing, serialize overlapping operations, preserve file metadata, and report best-effort rollback failures.
-- Validate action-specific structured input at both the tool schema and runtime boundary.
-- Generate structured diffs and render previews for previewable changes in mixed batches.
+- `apply_patch` matching is exact first, then tolerates escaped sequences and Unicode/trailing-whitespace drift; a fuzzy match is accepted only when it is unique, and non-uniform indentation is refused instead of guessed.
+- `write`, `edit`, and `apply_patch` bodies sit directly under the tool title, with no title/body gap.
+- The `apply_patch` header resolves the theme's tool background before painting.
 
 ## Fixed
 
-- Reject ambiguous or overlapping source matches, invalid UTF-8 files, and add/move collisions instead of silently rewriting or clobbering files.
+- Ambiguous `apply_patch` matches now report how many times `oldText` matched and ask for more context, instead of a misleading "not found".
 
 ## Install
 
 ```bash
-pi install npm:@heyhuynhgiabuu/pi-diff@0.9.0
+pi install npm:@heyhuynhgiabuu/pi-diff@0.9.1
 ```

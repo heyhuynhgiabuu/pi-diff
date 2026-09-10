@@ -64,6 +64,68 @@ describe("executeApplyPatch source-safe updates", () => {
 		expect(readFileSync(filePath, "utf8")).toBe(source);
 	});
 
+	it("recovers Unicode punctuation drift via the fuzzy fallback", async () => {
+		writeFileSync(filePath, "const label = \u201Chello\u201D;\nconst other = 2;\n");
+
+		const result = await executeApplyPatch([
+			{ path: filePath, action: "update", oldText: 'const label = "hello";\n', newText: 'const label = "hi";\n' },
+		]);
+
+		expect(result.ok).toBe(true);
+		expect(readFileSync(filePath, "utf8")).toBe('const label = "hi";\nconst other = 2;\n');
+	});
+
+	it("recovers escaped newlines in oldText via the fuzzy fallback", async () => {
+		writeFileSync(filePath, "line1\nline2\nline3\n");
+
+		const result = await executeApplyPatch([
+			{ path: filePath, action: "update", oldText: "line1\\nline2\n", newText: "joined\n" },
+		]);
+
+		expect(result.ok).toBe(true);
+		expect(readFileSync(filePath, "utf8")).toBe("joined\nline3\n");
+	});
+
+	it("refuses a non-uniform indentation drift instead of guessing", async () => {
+		const source = "function f() {\n    first();\n  second();\n}\n";
+		writeFileSync(filePath, source);
+
+		const result = await executeApplyPatch([
+			{
+				path: filePath,
+				action: "update",
+				oldText: "  first();\n  second();",
+				newText: "  firstUpdated();\n  secondUpdated();",
+			},
+		]);
+
+		expect(result.ok).toBe(false);
+		expect(readFileSync(filePath, "utf8")).toBe(source);
+	});
+
+	it("reports an ambiguous oldText as a uniqueness failure", async () => {
+		writeFileSync(filePath, "const a = 1;\nconst a = 1;\n");
+
+		const result = await executeApplyPatch([
+			{ path: filePath, action: "update", oldText: "const a = 1;\n", newText: "const a = 2;\n" },
+		]);
+
+		expect(result.ok).toBe(false);
+		expect(result.errors[0]?.error).toMatch(/matches 2 times/);
+		expect(result.errors[0]?.error).toMatch(/unique/);
+	});
+
+	it("reports a missing oldText as not found", async () => {
+		writeFileSync(filePath, "hello\n");
+
+		const result = await executeApplyPatch([
+			{ path: filePath, action: "update", oldText: "missing\n", newText: "x\n" },
+		]);
+
+		expect(result.ok).toBe(false);
+		expect(result.errors[0]?.error).toMatch(/not found/);
+	});
+
 	it("does not apply earlier changes when a later change is invalid", async () => {
 		const otherPath = join(tempDir, "other.ts");
 		writeFileSync(filePath, "const first = 1;\n");

@@ -4,6 +4,22 @@ All notable changes to `@heyhuynhgiabuu/pi-diff` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.9.1] — 2026-09-10
+
+### Added
+
+- **Tolerant `apply_patch` input** — accept a JSON-string payload, a single change object, and `edits` sent as a JSON string or a single object, matching Pi's SDK `edit` tolerance.
+
+### Changed
+
+- **Safer `apply_patch` matching** — after exact text, tolerate escaped sequences and Unicode/trailing-whitespace drift; accept a fuzzy match only when it is unique, and refuse non-uniform indentation instead of guessing.
+- **Tighter tool spacing** — `write`, `edit`, and `apply_patch` bodies now sit directly under the tool title, with no title/body gap.
+- **Themed `apply_patch` header** — resolve the theme's tool background before painting the header.
+
+### Fixed
+
+- **Accurate match failures** — ambiguous `oldText` now reports how many times it matched and asks for more context, instead of a misleading "not found".
+
 ## [0.9.0] — 2026-09-09
 
 ### Added
